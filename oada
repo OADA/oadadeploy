@@ -98,12 +98,11 @@ init() {
   # store OADA_HOME in bash-completion, default to current env
   echo "[ ! -z \${OADA_HOME} ] && OADA_HOME=\"${OADA_HOME}\"" > .oada/bash-completion
   docker run --rm oada/admin cat /support/bash-completion >> .oada/bash-completion
-  source .oada/bash-completion
   ensure_bash_completion_in_bashrc
 
   # symlink at /usr/local/bin to run from anywhere
   read -p "${GREEN}Make this ${NC}oada${GREEN} script default on this machine?${NC} [Y|n] " YN
-  if [[ $YN =~ y|Y ]]; then
+  if [[ "x$YN" =~ xy|xY ]]; then
     echo -e "\tSymlinking to /usr/local/bin/oada"
     ln -s "$OADA_HOME" /usr/local/bin/oada
   fi
@@ -124,6 +123,7 @@ init() {
 
   echo -e "${CYAN}Initialization complete.${NC}"
   echo -e "${YELLOW}Some things to do now:${NC}"
+  echo -e "    source ${OADA_HOME}/.oada/bash-completion"
   echo -e "    oada migrate /path/to/old/git/version/of/oada"
   echo -e "    oada domain add <my.domain>"
   echo -e "    oada service install trellisfw/target-helper"
