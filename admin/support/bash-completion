@@ -1,7 +1,9 @@
+[ ! -z ${OADA_HOME} ] && OADA_HOME="/Users/aultac/repos/oadadeploy"
+[ ! -z ${OADA_HOME} ] && OADA_HOME="/Users/aultac/repos/oadadeploy"
 # To change which oada gets bash-completion, set the OADA_HOME env var
 # Add bash_completion for all services names (oada and services)
 _oada_completions() {
-  local COMMANDS cur prev SERVICE_NAMES_CACHE
+  local COMMANDS cur prev preprev SERVICE_NAMES_CACHE
 
   COMMANDS="init admin upgrade domain service --help help -h"
   COMMANDS="${COMMANDS} build config create down events exec help images kill logs pause"
@@ -11,9 +13,10 @@ _oada_completions() {
   COMPREPLY=()
   cur=${COMP_WORDS[COMP_CWORD]}
   prev=${COMP_WORDS[COMP_CWORD-1]}
+  preprev=${COMP_WORDS[COMP_CWORD-2]}
 
-  # Figure out service names from each service's docker-compose: cached in .oada/service-names
-  SERVICE_NAMES_CACHE="${OADA_HOME}/.oada/service-names"
+  # Figure out service names from each service's docker-compose: cached in .oadadeploy/service-names
+  SERVICE_NAMES_CACHE="${OADA_HOME}/.oadadeploy/service-names"
   SERVICES=""
   # If there is no docker-compose, we have no service names to compute
   if [ -f "${OADA_HOME}/docker-compose.yml" ]; then
@@ -35,7 +38,7 @@ _oada_completions() {
         COMPREPLY=()
       ;;
       admin)
-        COMPREPLY=($(compgen -W "useradd extendToken bash" "$cur"))
+        COMPREPLY=($(compgen -W "useradd extendToken devusers bash" "$cur"))
       ;;
       upgrade)
         COMPREPLY=()
@@ -44,7 +47,10 @@ _oada_completions() {
         COMPREPLY=($(compgen -W "init enable disable" "$cur"))
       ;;
       service)
-        COMPREPLY=($(compgen -W "install enable disable upgrade" -- "$cur"))
+        COMPREPLY=($(compgen -W "install enable disable upgrade" "$cur"))
+      ;;
+      devusers)
+        COMPREPLY=($(compgen -W "add rm" "$cur"))
       ;;
       --help|help|-h)
         COMPREPLY=()
@@ -53,7 +59,19 @@ _oada_completions() {
         COMPREPLY=($(compgen -W "${SERVICES}" "$cur"))
       ;;
     esac
-  
+
+  # third-level completions
+  elif [ $COMP_CWORD -eq 3 ]; then
+    case "$preprev" in 
+      admin)
+        case "$prev" in
+          devusers) 
+            COMPREPLY=($(compgen -W "add rm" "$cur"))
+          ;;
+        esac
+      ;;
+    esac
+
   fi
   return 0
 }

@@ -1,6 +1,6 @@
 support
 domains
-.oada
+.oadadeploy
 docker-compose.yml
 docker-compose.override.yml
 common.yml
