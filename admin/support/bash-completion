@@ -1,19 +1,15 @@
-[ ! -z ${OADA_HOME} ] && OADA_HOME="/Users/aultac/repos/oadadeploy"
-[ ! -z ${OADA_HOME} ] && OADA_HOME="/Users/aultac/repos/oadadeploy"
 # To change which oada gets bash-completion, set the OADA_HOME env var
 # Add bash_completion for all services names (oada and services)
 _oada_completions() {
   local COMMANDS cur prev preprev SERVICE_NAMES_CACHE
 
-  COMMANDS="init admin upgrade domain service --help help -h"
+  COMMANDS="init admin upgrade domain service migrate --help help -h"
   COMMANDS="${COMMANDS} build config create down events exec help images kill logs pause"
   COMMANDS="${COMMANDS} port ps pull push restart rm run scale start stop top unpause up"
 
   # For 2-word completion, track cur and prev word
   COMPREPLY=()
   cur=${COMP_WORDS[COMP_CWORD]}
-  prev=${COMP_WORDS[COMP_CWORD-1]}
-  preprev=${COMP_WORDS[COMP_CWORD-2]}
 
   # Figure out service names from each service's docker-compose: cached in .oadadeploy/service-names
   SERVICE_NAMES_CACHE="${OADA_HOME}/.oadadeploy/service-names"
@@ -23,7 +19,7 @@ _oada_completions() {
     # If we have a docker-compose, and the service names cache is older than it, refresh the cache:
     # -ot means "older than"
     if [ ! -f "$SERVICE_NAMES_CACHE" ] || [ "$SERVICE_NAMES_CACHE" -ot "${OADA_HOME}/docker-compose.yml" ]; then
-      docker-compose config --services > "$SERVICE_NAMES_CACHE"
+      docker-compose config --services > "$SERVICE_NAMES_CACHE" 2> /dev/null
     fi
     SERVICES=$(cat $SERVICE_NAMES_CACHE)
   fi
@@ -33,15 +29,16 @@ _oada_completions() {
 
   # Second word (completion depends on the word)
   elif [ $COMP_CWORD -eq 2 ]; then
+    prev=${COMP_WORDS[COMP_CWORD-1]}
     case "$prev" in
       init)
-        COMPREPLY=()
+        COMPREPLY=($(compgen -W "help" "$cur"))
       ;;
       admin)
-        COMPREPLY=($(compgen -W "useradd extendToken devusers bash" "$cur"))
+        COMPREPLY=($(compgen -W "useradd extendToken devusers bash help" "$cur"))
       ;;
       upgrade)
-        COMPREPLY=()
+        COMPREPLY=($(compgen -W "ls latest help" "$cur"))
       ;;
       domain)
         COMPREPLY=($(compgen -W "init enable disable" "$cur"))
@@ -49,8 +46,8 @@ _oada_completions() {
       service)
         COMPREPLY=($(compgen -W "install enable disable upgrade" "$cur"))
       ;;
-      devusers)
-        COMPREPLY=($(compgen -W "add rm" "$cur"))
+      migrate)
+        COMPREPLY=($(compgen -afd "$cur"))
       ;;
       --help|help|-h)
         COMPREPLY=()
@@ -62,6 +59,8 @@ _oada_completions() {
 
   # third-level completions
   elif [ $COMP_CWORD -eq 3 ]; then
+    prev=${COMP_WORDS[COMP_CWORD-1]}
+    preprev=${COMP_WORDS[COMP_CWORD-2]}
     case "$preprev" in 
       admin)
         case "$prev" in
@@ -76,5 +75,5 @@ _oada_completions() {
   return 0
 }
 # Now register that function for the oada command's completions:
-complete -F _oada_completions oada
+complete -F _oada_completions oadadeploy
 
