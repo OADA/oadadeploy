@@ -1,0 +1,15 @@
+#! /bin/bash
+
+cd src
+SOURCES=$(ls)
+
+# You have to be careful to always surround FINAL's stuff w/ double quotes
+# in order to keep the newlines
+FINAL="$(cat oadadeploy)"
+for i in $SOURCES; do
+  # sed will add the contents of the file after the matched line, then remove matched line
+  FINAL="$(sed "/source ${i}/r ${i}" <<<"$FINAL" | sed "s/source ${i}//")"
+done
+
+echo "$FINAL" > ../oadadeploy
+echo "oadadeploy build created"
