@@ -11,6 +11,7 @@ ${GREEN}USAGE: $SCRIPTNAME admin [devusers|extendToken|useradd|bash]
 }
 
 admin() {
+  local CMD
   CMD=$1
   shift
   case $CMD in
@@ -41,16 +42,16 @@ admin() {
       docker-compose run --rm user add $@
     ;;
 
-    # just run bash in admin container
-    bash)
-      echo "${YELLOW}docker-compose run --rm admin bash $@${NC}"
-      docker-compose run --rm oada/admin bash
+    # run admin container, interactive
+    -it|-ti)
+      echo "${YELLOW}docker run --rm -it -v ${PWD}:/code oada/admin $@${NC}"
+      docker run --rm -it -v ${PWD}:/code oada/admin $@
     ;;
 
-    # run admin container w/ passthru commands, mapping . to /code
+    # run admin container w/ passthru commands, mapping . to /code, non-interactive
     *)
-      echo "${YELLOW}docker run --rm -v ${PWD}:/code admin $@${NC}"
-      docker run --rm -v ${PWD}:/code oada/admin $@
+      echo "${YELLOW}docker run --rm oada/admin ${CMD} $@${NC}"
+      docker run --rm -v ${PWD}:/code oada/admin ${CMD} $@
     ;;
   esac
 }

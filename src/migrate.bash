@@ -105,7 +105,6 @@ migrate() {
   fi
 
   # Refresh docker-compose.yml with the service's docker-compose.yml files
-  echo "Refreshing docker-compose.yml from migrated services and domains"
   refresh_compose || exit 1
 
   echo "Migration complete"

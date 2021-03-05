@@ -30,7 +30,7 @@ init() {
   # Setup and maintain a ./.oadadeploy/ folder to drive bash_completion and store other info
   # store OADA_HOME in bash-completion, default to current env
   echo "[ ! -z \${OADA_HOME} ] && OADA_HOME=\"${OADA_HOME}\"" > .oadadeploy/bash-completion
-  docker run --rm oada/admin cat /support/bash-completion >> .oadadeploy/bash-completion
+  admin cat /support/bash-completion >> .oadadeploy/bash-completion
   ensure_bash_completion_in_bashrc
 
   # symlink at /usr/local/bin to run from anywhere

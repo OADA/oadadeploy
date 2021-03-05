@@ -10,7 +10,7 @@ ${GREEN}USAGE: $SCRIPTNAME domain [add|refresh] [-y] <domain>
 # Run the domain-add within the admin container so it doesn't have to keep dropping into
 # to run jq, node, oada-certs, etc.
 domain_add() {
-  admin bash -c "DOMAIN=\"${DOMAIN}\" /support/domains/domain-add $@"
+  admin -it /support/domains/domain-add $@ $DOMAIN
 }
 
 domain() {
