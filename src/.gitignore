@@ -1,5 +1,9 @@
+support
 domains
+services
+oada
 .oadadeploy
 docker-compose.yml
 docker-compose.override.yml
+new.*
 common.yml

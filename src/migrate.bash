@@ -37,7 +37,7 @@ migrate() {
 
   # Copy any services-enabled
   if [ -d "$OLD/services-enabled" ]; then
-    read -p "Copy services-enabled? [N|y] " YN
+    read -p "${GREEN}Copy services-enabled? [N|y]${NC} " YN
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf $OLD/services-enabled/* ./services/.${NC}"
       cp -rf $OLD/services-enabled/* ./services/.
@@ -45,35 +45,48 @@ migrate() {
       # Check for z_tokens: add it to docker-compose.override.yml if it exists
       if [ -f "./services/z_tokens/docker-compose.yml" ]; then
         echo "Found ${CYAN}z_tokens${NC}, adding it explicitly to docker-compose.override.yml and removing from ./services"
-        merge_with_override services/z_tokens/docker-compose.yml \
-        && rm -rf ./services/z_tokens
+        merge_with_override --skip-validate services/z_tokens/docker-compose.yml || exit 1
+        rm -rf ./services/z_tokens
+        echo "z_tokens merged successfully"
       fi
 
-      # Every "old" service contained an entry for admin and possibly yarn containers.  Removing those entries will fix 90% of upgrade issues.
-      for i in $(cd ./services && ls); do
-        remove_services_from_yml $i/docker-compose.yml admin yarn || exit 1
+      # Now do per-service fixups
+      for i in $(cd ./services && $ls); do
+        echo "Doing initial git pull in services/$i"
+        # Do a git pull in case this service has already been updated to oada v3 model
+        (cd ./services/$i && git pull && cd ..) || (echo "Failed to git pull in service $i" && exit 1)
+
+        # If this service has a new docker-compose.oada.yml, do not auto-fix anything in it.
+        # If it does not, assume that it needs to be auto-fixed
+        if [ ! -f ./services/$i/docker-compose.oada.yml ]; then
+          # Copy the base docker-compose to oada-specific version
+          cp services/$i/docker-compose.yml services/$i/docker-compose.oada.yml
+          # Every "old" service contained an entry for admin and possibly yarn containers.  Removing those entries will fix 90% of upgrade issues.
+          echo "Cleaning any admin and yarn entries from services/$i/docker-compose.oada.yml"
+          remove_services_from_yml services/$i/docker-compose.oada.yml admin yarn || exit 1
+  
+          # All the "old" services used services-available/<name>, change to services/<name>
+          echo "Replacing services-available with services in services/$i/docker-compose.oada.yml"
+          REPLACED="$(sed 's/services-available/services/g' services/$i/docker-compose.oada.yml)"
+          echo "$REPLACED" > services/$i/docker-compose.oada.yml
+        fi
       done
 
-      # Refresh docker-compose.yml with the service's docker-compose.yml files
-      refresh_compose
     fi
   fi
 
   # Copy any domains-enabled
   if [ -d "$OLD/domains-enabled" ]; then
-    read -p "Copy domains-enabled? [N|y] " YN
+    read -p "${GREEN}Copy domains-enabled? [N|y] ${NC}" YN
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf "$OLD/domains-enabled/*" ./domains/.${NC}"
       cp -rf $OLD/domains-enabled/* ./domains/.
-      for i in $(ls ./domains); do
-        echo "    Enabling domain ${CYAN}$i${NC}"
-        domain_enable $i
-      done
+      refresh_domains || exit 1
     fi
   fi
 
   # Copy any docker volumes w/ prior folder name as prefix into current folder name
-  read -p "Copy docker volumes?? [N|y] " YN
+  read -p "${GREEN}Copy docker volumes?? [N|y] ${NC}" YN
   if [[ "$YN" =~ y|Y|yes ]]; then
     OLDBASE=$(basename "$OLD")
     NEWBASE=$(basename "$OADA_HOME")
@@ -91,7 +104,9 @@ migrate() {
     done
   fi
 
-  # Add all service docker-composes to 
+  # Refresh docker-compose.yml with the service's docker-compose.yml files
+  echo "Refreshing docker-compose.yml from migrated services and domains"
+  refresh_compose || exit 1
 
   echo "Migration complete"
 }

@@ -3,7 +3,7 @@
 _oada_completions() {
   local COMMANDS cur prev preprev SERVICE_NAMES_CACHE
 
-  COMMANDS="init admin upgrade domain service migrate --help help -h"
+  COMMANDS="init admin upgrade domain service refresh migrate --help help -h"
   COMMANDS="${COMMANDS} build config create down events exec help images kill logs pause"
   COMMANDS="${COMMANDS} port ps pull push restart rm run scale start stop top unpause up"
 
@@ -41,13 +41,16 @@ _oada_completions() {
         COMPREPLY=($(compgen -W "ls latest help" "$cur"))
       ;;
       domain)
-        COMPREPLY=($(compgen -W "init enable disable" "$cur"))
+        COMPREPLY=($(compgen -W "add refresh" "$cur"))
       ;;
       service)
-        COMPREPLY=($(compgen -W "install enable disable upgrade" "$cur"))
+        COMPREPLY=($(compgen -W "install upgrade refresh" "$cur"))
       ;;
       migrate)
         COMPREPLY=($(compgen -afd "$cur"))
+      ;;
+      refresh)
+        COMPREPLY=($(compgen -W "help -h --help" "$cur"))
       ;;
       --help|help|-h)
         COMPREPLY=()
@@ -67,6 +70,13 @@ _oada_completions() {
           devusers) 
             COMPREPLY=($(compgen -W "add rm" "$cur"))
           ;;
+        esac
+      ;;
+      service)
+        case "$prev" in 
+          install) COMPREPLY=() ;;
+          upgrade) COMPREPLY=($(compgen -W "$SERVICES" "$cur"))
+          refresh) COMPREPLY=()
         esac
       ;;
     esac

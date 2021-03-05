@@ -45,9 +45,6 @@ init() {
     fi
   fi
 
-  # If no docker-compose, pull one
-  [ -f docker-compose.yml ] || upgrade || exit 1
-
   # If no overrides, go ahead and make one
   if [ ! -f docker-compose.override.yml ]; then
     # yq_deep_merge won't work if it's empty, so start it w/ a version
@@ -55,10 +52,14 @@ init() {
     if ensure_nonempty_yml docker-compose.yml; then
       COMPOSE_VERSION=$(yq e '.version' docker-compose.yml)
     elif ensure_nonempty_yml oada/docker-compose.yml; then
-      COMPOSE_VERSION=$(yq e '.vesion' oada/docker-compose.yml)
+      COMPOSE_VERSION=$(yq e '.version' oada/docker-compose.yml)
     fi
+    echo "Initializing ${CYAN}docker-compose.override.yml${NC} with version ${COMPOSE_VERSION}"
     echo "version: \"${COMPOSE_VERSION}\"" > docker-compose.override.yml
   fi
+
+  # If no docker-compose, pull one
+  [ -f docker-compose.yml ] || upgrade || exit 1
 
   echo -e "${CYAN}Initialization complete.${NC}"
   echo -e "${YELLOW}Some things to do now:${NC}"

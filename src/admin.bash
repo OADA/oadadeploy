@@ -44,13 +44,13 @@ admin() {
     # just run bash in admin container
     bash)
       echo "${YELLOW}docker-compose run --rm admin bash $@${NC}"
-      docker-compose run --rm admin bash
+      docker-compose run --rm oada/admin bash
     ;;
 
     # run admin container w/ passthru commands, mapping . to /code
     *)
-      echo "${YELLOW}docker run --rm -v .:/code admin $@${NC}"
-      docker run --rm -v .:/code admin $@
+      echo "${YELLOW}docker run --rm -v ${PWD}:/code admin $@${NC}"
+      docker run --rm -v ${PWD}:/code oada/admin $@
     ;;
   esac
 }

@@ -54,6 +54,7 @@ fetch_github() {
   fi
   
 }
+
 fetch_github_versions() {
   local CURL RELEASES
   CURL="curl -fsSL"
@@ -68,12 +69,15 @@ fetch_github_versions() {
     exit 1
   fi
 }
+
 fetch_oada() {
   fetch_github oada/oada-srvc-docker $1
 }
+
 fetch_oada_versions() {
   fetch_github_versions oada/oada-srvc-docker
 }
+
 upgrade() {
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage upgrade
