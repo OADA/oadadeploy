@@ -12,7 +12,7 @@ for your domains.
 Create a folder to hold your local `oada` installation, then curl this file into it and make it executable.
 
 ```bash
-curl -ofsSL https://raw.githubusercontent.com/oada/oadadeploy/master/oadadeploy && chmod u+x oadadeploy
+curl -OfsSL https://raw.githubusercontent.com/oada/oadadeploy/master/oadadeploy && chmod u+x oadadeploy
 ```
 
 ## Usage
