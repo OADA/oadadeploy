@@ -51,21 +51,50 @@ require ls sed curl docker docker-compose
 CMD=$1
 shift
 case $CMD in 
-  compose) compose $@ ;;
+  compose) 
+    compose $@ 
+  ;;
+
   # Exact list of docker-compose commands to pass thru
   build|config|create|down|events|exec|images|kill|logs|pause|port|ps|pull|push|restart|rm|run|scale|start|stop|top|unpause|up) 
     compose $CMD $@
   ;;
 
-  admin) admin $@ ;;
-  init) init $@ ;;
-  upgrade) upgrade $@ ;;
-  domain) domain $@ ;;
-  service) service $@ ;;
-  migrate) migrate $@ ;;
-  refresh) refresh ;;
-  help|--help|-h) usage $@ ;;
-  *) usage $@
+  admin) 
+    admin $@ 
+  ;;
+
+  init) 
+    init $@ 
+  ;;
+
+  upgrade) 
+    upgrade $@ 
+  ;;
+
+  domain) 
+    domain $@ 
+  ;;
+
+  service) 
+    service $@ 
+  ;;
+
+  migrate) 
+    migrate $@ 
+  ;;
+
+  refresh) 
+    refresh 
+  ;;
+
+  help|--help|-h) 
+    usage $@ 
+  ;;
+
+  *) 
+    usage $@
+  ;;
 esac
 
 

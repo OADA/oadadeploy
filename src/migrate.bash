@@ -72,6 +72,8 @@ migrate() {
         fi
       done
 
+      # Refresh/create services/docker-compose.yml
+      refresh_services || exit 1
     fi
   fi
 
@@ -104,8 +106,13 @@ migrate() {
     done
   fi
 
+  echo "WARNING: Adding --database.auto-upgrade=true to arangodb command in ${YELLOW}docker-compose.override.yml${NC}."
+  echo "After you successfully bring it up the first time, you should remove that."
+  yq -i e '.services.arangodb.command = [ "arangod", "--server.statistics", "true", "--database.auto-upgrade", "true" ]' docker-compose.override.yml
+
   # Refresh docker-compose.yml with the service's docker-compose.yml files
   refresh_compose || exit 1
+
 
   echo "Migration complete"
 }

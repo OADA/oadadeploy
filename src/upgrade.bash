@@ -1,7 +1,7 @@
 usage_upgrade() {
   echo -e "\n\
 Upgrade existing deployment to a different oada version.
-${GREEN}USAGE: $SCRIPTNAME upgrade [ls|latest|<version>]${NC}
+${GREEN}USAGE: $SCRIPTNAME upgrade [-y] [ls|latest|<version>]${NC}
     Without parameters, it prompts for version, default latest
     ${CYAN}ls${NC}\t\tList available OADA versions in github
     ${CYAN}latest${NC}\tReplace oada/docker-compose.yml with latest github release
@@ -14,101 +14,77 @@ Examples:
     ${YELLOW}$SCRIPTNAME upgrade v3.0.0${NC}"
 }
 
-fetch_github() {
-  local CURL VER REPO RELEASE
-  CURL="curl -fsSL"
-  REPO=$1
-  VER=$2
-
-  # If there are no %'s already, try to urlencode so +'s and other things are prepped for URL
-  if [[ ! "$VER" =~ "%" ]]; then 
-    # Need the surrounding quotes so jq will parse
-    VER=$(echo "\"$VER\"" | jq -r '@uri')
-  fi
-
-  # Figure out URL for Github
-  echo -e "${YELLOW}Fetching version ${CYAN}${VER}${YELLOW} of docker-compose.yml from github repo ${REPO}${NC}"
-  case "$VER" in 
-    latest) INFOURL="https://api.github.com/repos/${REPO}/releases/${VER}" ;;
-    *)      INFOURL="https://api.github.com/repos/${REPO}/releases/tags/${VER}"
-  esac
-
-  # Get info for release (to find docker-compose.yml link)
-  RELEASE=$($CURL ${INFOURL})
-  if [ $? -ne 0 ]; then 
-    echo -e "Failed to retrieve version ${VER} from github for $1."
-    exit 1
-  fi
-  URL=$(jq -r '(.assets[] | select(.name == "docker-compose.yml") | .browser_download_url)' <<< $"$RELEASE" )
-  if [ $? -ne 0 ]; then
-    echo "Failed to interpret release info response from github, response was $RELEASE"
-    exit 1
-  fi
-
-  # Pull the docker-compose and store in oada/docker-compose.yml
-  $CURL $URL > oada/docker-compose.yml
-  if [ $? -ne 0 ]; then
-    echo -e "Failed to retrieve docker-compose at URL $URL"
-    rm oada/docker-compose.yml
-    exit 1
-  fi
-  
-}
-
-fetch_github_versions() {
-  local CURL RELEASES
-  CURL="curl -fsSL"
-  RELEASES=$($CURL https://api.github.com/repos/$1/releases)
-  if [ $? -ne 0 ]; then
-    echo "Failed to retrieve releases list for repo $1"
-    exit 1
-  fi
-  echo "$RELEASES" | jq -r '.[] | .tag_name'
-  if [ $? -ne 0 ]; then
-    echo "Failed to interpret github response for releases, response was $RELEASES"
-    exit 1
-  fi
-}
-
-fetch_oada() {
-  fetch_github oada/oada-srvc-docker $1
-}
-
-fetch_oada_versions() {
-  fetch_github_versions oada/oada-srvc-docker
-}
-
-upgrade() {
+# upgrade_core [-y] [-h|-r <repo>] <directory> [latest|ls|version]
+# upgrade_core -h
+# upgrade_core ./oada -> put oada/oada-srvc-docker assets into ./oada folder
+# upgrade_core ./oada latest -> oada/oada-srvc-docker @ latest into ./oada folder
+# upgrade_core -r trellisfw/trellis-monitor ./services/trellis-monitor ->  put repo 
+upgrade_core() {
+  local DIR VERSION REPO OLDPWD ACCEPT_DEFAULTS
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage upgrade
 
-  OADA_VERSION=$1
-  # oada upgrade ls will print the versions and exit
-  if [ "$OADA_VERSION" == "ls" ]; then
+  ACCEPT_DEFAULTS=0
+  if [ "$1" == "-y" ]; then
+    ACCEPT_DEFAULTS=1
+    shift
+  fi
+
+  # Default to oada, otherwise it is a service to upgrade
+  REPO="oada/oada-srvc-docker"
+  if [ "$1" == "-r" ]; then
+    REPO=$2
+    shift
+    shift
+  fi
+  # Get the folder name:
+  DIR="$1"
+  shift
+
+  # Figure out version to pull:
+  VERSION=""
+  if [ $# -gt 0 ]; then
+    VERSION="$1"
+  fi
+  # upgrade ls will print the versions and exit
+  if [ "$VERSION" == "ls" ]; then
     echo "${YELLOW}Available OADA release versions in github:${NC}"
-    fetch_oada_versions
+    fetch_github_versions $REPO
     exit 0
   fi
 
   # Otherwise, they passed a version or need to be asked for one:
-  while [ "x$OADA_VERSION" == "x" ]; do
-    read -p "${GREEN}What oada version would you like to use (default latest, ls to see versions)? ${NC}[latest|ls|<version>] " OADA_VERSION
-    if [ "x$OADA_VERSION" == "x" ]; then 
-      OADA_VERSION="latest"
-    elif [ "$OADA_VERSION" == "ls" ]; then
-      OADA_VERSION=""
-      echo -e "${YELLOW} Fetching list of OADA versions${NC}"
-      fetch_oada_versions
+  if [ "$ACCEPT_DEFAULTS" -eq 1 ]; then
+    VERSION="latest"
+  fi
+  while [ "x$VERSION" == "x" ]; do
+    read -p "${GREEN}What version of $REPO would you like to use (default latest, ls to see versions)? ${NC}[latest|ls|<version>] " VERSION
+    if [ "x$VERSION" == "x" ]; then 
+      VERSION="latest"
+    elif [ "$VERSION" == "ls" ]; then
+      VERSION=""
+      echo -e "${YELLOW} Fetching list of $REPO versions${NC}"
+      fetch_github_versions $REPO
     fi
   done
 
   # Get the actual docker-compose and save to oada/docker-compose.yml
-  fetch_oada ${OADA_VERSION}
+  OLDPWD="${PWD}"
+  cd "${DIR}"
+  fetch_github ${REPO} ${VERSION}
+  cd "${OLDPWD}"
 
   # Recreate primary docker-compose.yml
   refresh_compose
 }
 
-
+upgrade() {
+  local DEFAULTS
+  if [ "$1" == "-y" ]; then
+    DEFAULTS="-y"
+    shift
+  fi
+  upgrade_core ${DEFAULTS} ./oada $@
+}
 
 

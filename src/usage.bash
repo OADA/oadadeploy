@@ -18,7 +18,7 @@ OADA Commands:
    ${CYAN}admin${NC}\tRun oada admin command, refer to admin help for specific commands
    ${CYAN}domain${NC}\tAdd a domain or refresh domains/docker-compose.yml from domains
    ${CYAN}service${NC}\tInstall or upgrade services, or refresh docker-compose.yml from services
-   ${CYAN}refresh${NC}\tRefresh docker-compose.yml
+   ${CYAN}refresh${NC}\tRefresh docker-compose.yml from domains/docker-compose.yml and services/docker-compose.yml
 
 docker-compose commands supported as passthru w/ bash-completion (refer to docker-compose documentation):
    ${YELLOW}build, config, create, down, events, exec, help, images, kill, logs, pause,

@@ -122,4 +122,71 @@ remove_services_from_yml() {
 }
 
 
+# Fetch releases from github
+# fetch_github oada/oada-srvc-docker latest docker-compose.yml support
+fetch_github() {
+  local CURL VER REPO RELEASE URLS
+  CURL="curl -fsSL"
+  REPO=$1
+  shift
+  VER=$1
+  shift
+
+  # Need to urlencode the version (to account for +'s)
+  # If there are no %'s already, try to urlencode so +'s and other things are prepped for URL
+  if [[ ! "$VER" =~ "%" ]]; then 
+    # Need the surrounding quotes so jq will parse
+    VER=$(echo "\"$VER\"" | jq -r '@uri')
+  fi
+
+  # Figure out URL for Github
+  echo -e "${YELLOW}Fetching version ${CYAN}${VER}${YELLOW} of docker-compose.yml from github repo ${REPO}${NC}"
+  case "$VER" in 
+    latest) INFOURL="https://api.github.com/repos/${REPO}/releases/${VER}" ;;
+    *)      INFOURL="https://api.github.com/repos/${REPO}/releases/tags/${VER}"
+  esac
+
+  # Get info for release (to find docker-compose.yml link)
+  RELEASE=$($CURL ${INFOURL})
+  if [ $? -ne 0 ]; then 
+    echo -e "Failed to retrieve version ${VER} from github for $1."
+    exit 1
+  fi
+
+  # Get the browser_download_url for each listed asset
+  URLS=( $(jq -r '.assets[] | .browser_download_url' <<< $"$RELEASE") )
+  if [ $? -ne 0 ]; then
+    echo "Failed to interpret release info response from github, response was $RELEASE"
+    exit 1
+  fi
+
+  for u in ${URLS[@]}; do 
+    echo "Retrieving github release asset ${YELLOW}$u${NC}"
+    # Pull each listed "asset" and store in current directory
+    # (the "O" adds O to the options which preserves original filename)
+    ${CURL}O $u
+    if [ $? -ne 0 ]; then
+      echo -e "Failed to retrieve asset at URL $URL"
+      exit 1
+    fi
+  done
+  
+}
+
+fetch_github_versions() {
+  local CURL RELEASES
+  CURL="curl -fsSL"
+  RELEASES=$($CURL https://api.github.com/repos/$1/releases)
+  if [ $? -ne 0 ]; then
+    echo "Failed to retrieve releases list for repo $1"
+    exit 1
+  fi
+  echo "$RELEASES" | jq -r '.[] | .tag_name'
+  if [ $? -ne 0 ]; then
+    echo "Failed to interpret github response for releases, response was $RELEASES"
+    exit 1
+  fi
+}
+
+
 

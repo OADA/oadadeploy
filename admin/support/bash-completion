@@ -1,8 +1,9 @@
 # To change which oada gets bash-completion, set the OADA_HOME env var
 # Add bash_completion for all services names (oada and services)
 _oada_completions() {
-  local COMMANDS cur prev preprev SERVICE_NAMES_CACHE
-
+  local COMMANDS cur prev preprev SERVICE_NAMES_CACHE ls DOMAIN_LS SERVICE_LS
+  ls=$(which ls)
+ 
   COMMANDS="init admin upgrade domain service refresh migrate --help help -h"
   COMMANDS="${COMMANDS} build config create down events exec help images kill logs pause"
   COMMANDS="${COMMANDS} port ps pull push restart rm run scale start stop top unpause up"
@@ -28,23 +29,57 @@ _oada_completions() {
     COMPREPLY=($(compgen -W "${COMMANDS}" "$cur"))
 
   # Second word (completion depends on the word)
-  elif [ $COMP_CWORD -eq 2 ]; then
-    prev=${COMP_WORDS[COMP_CWORD-1]}
-    case "$prev" in
+  elif [ $COMP_CWORD -gt 1 ]; then
+    firstcmd=${COMP_WORDS[1]}
+    COMPREPLY=()
+    case "$firstcmd" in
+
       init)
-        COMPREPLY=($(compgen -W "help" "$cur"))
+        if [ $COMP_CWORD -eq 2 ]; then 
+          COMPREPLY=($(compgen -W "help" "$cur"))
+        fi
       ;;
+
       admin)
-        COMPREPLY=($(compgen -W "useradd extendToken devusers bash help" "$cur"))
+        if [ $COMP_CWORD -eq 2 ]; then
+          COMPREPLY=($(compgen -W "useradd extendToken devusers bash help" "$cur"))
+        elif [ $COMP_CWORD -eq 3 ]; then
+          secondcmd="${COMP_WORDS[2]}"
+          case $secondcmd in
+            devusers) COMPREPLY=($(compgen -W "add rm" "$cur")) ;;
+          esac
+        fi
       ;;
+
       upgrade)
-        COMPREPLY=($(compgen -W "ls latest help" "$cur"))
+        if [ $COMP_CWORD -eq 2 ]; then
+          COMPREPLY=($(compgen -W "ls latest help" "$cur"))
+        fi
       ;;
+
       domain)
-        COMPREPLY=($(compgen -W "add refresh" "$cur"))
+        if [ $COMP_CWORD -eq 2 ]; then
+          COMPREPLY=($(compgen -W "add refresh primary help" "$cur"))
+        elif [ $COMP_CWORD -eq 3 ]; then
+          secondcmd=${COMP_WORDS[2]}
+          DOMAIN_LS="$(cd $OADA_HOME/domains && $ls | sed '/docker-compose/d')"
+          case "$secondcmd" in 
+            primary) COMPREPLY=($(compgen -W "$DOMAIN_LS" "$cur")) ;;
+          esac
+        fi
       ;;
+
       service)
-        COMPREPLY=($(compgen -W "install upgrade refresh" "$cur"))
+        if [ $COMP_CWORD -eq 2 ]; then
+          COMPREPLY=($(compgen -W "install upgrade refresh help" "$cur"))
+        elif [ $COMP_CWORD -eq 3 ]; then
+          secondcmd=${COMP_WORDS[2]}
+          SERVICE_LS="$(cd $OADA_HOME/services && $ls | sed '/docker-compose/d')"
+          case "$secondcmd" in 
+            upgrade) COMPREPLY=($(compgen -W "$SERVICE_LS" "$cur")) ;;
+          esac
+        fi
+
       ;;
       migrate)
         COMPREPLY=($(compgen -afd "$cur"))
@@ -59,29 +94,8 @@ _oada_completions() {
         COMPREPLY=($(compgen -W "${SERVICES}" "$cur"))
       ;;
     esac
-
-  # third-level completions
-  elif [ $COMP_CWORD -eq 3 ]; then
-    prev=${COMP_WORDS[COMP_CWORD-1]}
-    preprev=${COMP_WORDS[COMP_CWORD-2]}
-    case "$preprev" in 
-      admin)
-        case "$prev" in
-          devusers) 
-            COMPREPLY=($(compgen -W "add rm" "$cur"))
-          ;;
-        esac
-      ;;
-      service)
-        case "$prev" in 
-          install) COMPREPLY=() ;;
-          upgrade) COMPREPLY=($(compgen -W "$SERVICES" "$cur"))
-          refresh) COMPREPLY=()
-        esac
-      ;;
-    esac
-
   fi
+
   return 0
 }
 # Now register that function for the oada command's completions:

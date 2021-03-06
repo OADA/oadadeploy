@@ -50,8 +50,14 @@ admin() {
 
     # run admin container w/ passthru commands, mapping . to /code, non-interactive
     *)
-      echo "${YELLOW}docker run --rm oada/admin ${CMD} $@${NC}"
-      docker run --rm -v ${PWD}:/code oada/admin ${CMD} $@
+      # If they pass only "bash", default make it interactive
+      if [ "$#" -eq 0 ] && [ "$CMD" == "bash" ]; then
+        docker run --rm -it -v ${PWD}:/code oada/admin ${CMD} $@
+      else
+        echo "${YELLOW}docker run --rm oada/admin ${CMD} $@${NC}"
+        docker run --rm -v ${PWD}:/code oada/admin ${CMD} $@
+      fi
+
     ;;
   esac
 }

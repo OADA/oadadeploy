@@ -3,7 +3,7 @@ FROM node:14-buster-slim
 WORKDIR /code
 
 RUN apt-get -y update
-RUN apt-get -y --no-install-recommends install jq curl ca-certificates
+RUN apt-get -y --no-install-recommends install jq curl ca-certificates openssl
 
 RUN yarn global add @oada/oada-certs
 

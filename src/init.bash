@@ -22,22 +22,32 @@ ensure_bash_completion_in_bashrc() {
 }
 
 init() {
-  local COMPOSE_VERSION
+  local COMPOSE_VERSION ACCEPT_DEFAULTS ARGS
   [[ $@ =~ -h|--help|help|\? ]] && usage init
+
+  ACCEPT_DEFAULTS=0
+  if [ "$1" == "-y" ]; then
+    ACCEPT_DEFAULTS=1
+  fi
+
   # Create the necessary folder structure:
   mkdir -p domains services oada .oadadeploy
 
   # Setup and maintain a ./.oadadeploy/ folder to drive bash_completion and store other info
   # store OADA_HOME in bash-completion, default to current env
   echo "[ ! -z \${OADA_HOME} ] && OADA_HOME=\"${OADA_HOME}\"" > .oadadeploy/bash-completion
-  admin cat /support/bash-completion >> .oadadeploy/bash-completion
+  docker run --rm oada/admin cat /support/bash-completion >> .oadadeploy/bash-completion
   ensure_bash_completion_in_bashrc
 
   # symlink at /usr/local/bin to run from anywhere
   LNPATH=/usr/local/bin/oadadeploy
   # Only ask the user if this script is not already the default:
-  if [ "$(readlink $LNPATH)" != "$OADA_HOME/oadadeploy" ]; then
-    read -p "${GREEN}Make this ${NC}oadadeploy${GREEN} script default on this machine?${NC} [Y|n] " YN
+  if [ "$(readlink_crossplatform $LNPATH)" != "$OADA_HOME/oadadeploy" ]; then
+    if [ "$ACCEPT_DEFAULTS" -ne 1 ]; then 
+      read -p "${GREEN}Make this ${NC}oadadeploy${GREEN} script default on this machine?${NC} [Y|n] " YN
+    else
+      YN="y"
+    fi
     if [[ "x$YN" =~ ^(x|xy|xY)$ ]]; then
       echo -e "\tSymlinking to /usr/local/bin/oadadeploy"
       [ -h $LNPATH ] && unlink $LNPATH
@@ -59,7 +69,12 @@ init() {
   fi
 
   # If no docker-compose, pull one
-  [ -f docker-compose.yml ] || upgrade || exit 1
+  ARGS=""
+  if [ "$ACCEPT_DEFAULTS" -eq 1 ]; then 
+    ARGS="-y"
+  fi
+
+  [ -f docker-compose.yml ] || upgrade ${ARGS} || exit 1
 
   echo -e "${CYAN}Initialization complete.${NC}"
   echo -e "${YELLOW}Some things to do now:${NC}"
@@ -68,5 +83,8 @@ init() {
   echo -e "    oadadeploy domain add <my.domain>"
   echo -e "    oadadeploy service install trellisfw/trellis-monitor"
   echo -e "    oadadeploy up"
+  echo -e "${YELLOW}IMPORTANT:${NC}"
+  echo -e "    You need add at least one domain. "
+  echo -e "    If you have none then ${CYAN}oadadeploy domain add -y localhost${NC}"
 }
 

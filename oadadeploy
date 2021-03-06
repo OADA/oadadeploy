@@ -1,96 +1,108 @@
 #! /bin/bash
 
+
+
 GREEN=$'\033[0;32m'
 YELLOW=$'\033[1;33m'
 CYAN=$'\033[0;36m'
 NC=$'\033[0m' # No Color
 SCRIPTNAME=$0
 
+# Use the actual ls instead of any alias that could output extra chars
+ls=$(which ls)
+
+readlink_crossplatform() {
+  local P
+  # First try it as Linux has it (with -f)
+  P=$(readlink -f $1 2> /dev/null)
+  if [ "$?" -ne 0 ]; then
+    # POSIX failed, try mac readlink:
+    P=$(readlink $1 2> /dev/null)
+    if [ "$?" -ne 0 ]; then
+      return 1
+    fi
+  fi
+  echo "$P"
+  return 0
+}
+
 # If no OADA_HOME, set it to the absolute path of this script
-if ! test -d OADA_HOME; then
-  OADA_HOME="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+if ! test -d "$OADA_HOME"; then
+  SCRIPTPATH="$0"
+  if [ -L "$SCRIPTPATH" ]; then
+    SCRIPTPATH=$(dirname $(readlink_crossplatform $SCRIPTPATH))
+  else
+    # Otherwise, to be safe for symlinks in the path somewhere, use the dirname pwd -P trick:
+    SCRIPTPATH=$(cd $(dirname "$SCRIPTPATH") > /dev/null 2>&1; pwd -P)
+  fi
+
+  OADA_HOME="$SCRIPTPATH"
 fi
+
 cd "${OADA_HOME}"
 
 
-#----------------------------------------------------------------------------
-#----------------------------------------------------------------------------
-# Utilities:
-#----------------------------------------------------------------------------
-#----------------------------------------------------------------------------
+
 
 
 jq() { 
   docker run --rm -i -v "${PWD}:/code" oada/admin jq "$@" 
 }
-yq() { 
+
+yq() {
   docker run --rm -i -v "${PWD}:/code" oada/admin yq "$@" 
 }
+
+join() {
+  IFS="$1"
+  shift
+  echo "$*"
+}
+
 # yq doesn't merge anything if any of the files is empty, this is how yq says to test for empty file
 ensure_nonempty_yml() {
+  # If the file doesn't exist, same as empty (error)
+  if [ ! -f "$1" ]; then
+    return 1 
+  fi
   yq e --exit-status 'tag == "!!map" or tag== "!!seq"' $1 2>&1
 }
+
 # Use yq to do the same thing docker does w/ multiple yml files
 yq_deep_merge() {
-  local cmd res
-  # Construct string for yq like "select(fi == 0) *d select(fi == 1)"
-  # Need one entry for every file's index
-  # The *d says what kind of merging happens, in this case a deep merge
-  cmd="'"
-  for ((i=0; i<$#; i++)); do
-    res=$(ensure_nonempty_yml $1)
+  local res
+  # Make sure none of the files are empty, b/c that will screw up yq
+  for i in $@; do
+    res=$(ensure_nonempty_yml $i)
     if [ "$?" -ne 0 ]; then
-      echo "ERROR: file $1 is empty or invalid yml.  It must at least contain one element (like version)." 1>&2
-      echo "$res"
+      echo "ERROR: file $i is empty or invalid yml.  It must at least contain one element (like version)." 1>&2
+      echo "$res" 1>&2
       exit 1
     fi
-    if [ "$i" -gt 0 ]; then
-      cmd="${cmd} *d"
-    fi
-    cmd="${cmd} select(fi == ${i})"
-    shift
   done
-  cmd="${cmd}'"
   # output result of merge to stdout
-  eval "yq eval-all ${cmd} $@"
+  yq ea '. as $item ireduce ({}; . *+ $item )' $@
 }
 
 # Run docker-compose config on existing setup to confirm it all looks good to docker:
 validate_compose() {
   local RES
-  RES=$(docker-compose "$@" config 2>&1)
+  RES="$(docker-compose "$@" config 2>&1 > /dev/null)"
   if [ "$?" -ne 0 ]; then
-    echo $RES;
+    echo "$RES";
     return 1;
   fi
   return 0;
 }
 
-# List all the docker-compose files that would be included in docker-compose.yml
-compose_files() {
-  echo "oada/docker-compose.yml"
-  find ./services -name "docker-compose.yml"
-}
-
-# Rebuild docker-compose.yml from all the services and oada
-refresh_compose() {
-  local res
-  yq_deep_merge $(compose_files) > new.docker-compose.yml
-  res=$(validate_compose -f new.docker-compose.yml -f docker-compose.override.yml)
-  if [ "$?" -ne 0 ]; then
-    echo "Newly merged docker-compose.yml would be invalid to docker, aborting.  Failed merge is in new.docker-compose.yml"
-    echo "Manually fix and check w/ ${YELLOW}docker-compose -f new.docker-compose.yml -f docker-compose.override.yml config${NC}"
-    echo "$res"
-    return 1;
-  else
-    mv new.docker-compose.yml docker-compose.yml
-    return 0;
-  fi
-}
 merge_with_override() {
-  local res
+  local res skipvalidate
+  if [ "$1" == "--skip-validate" ]; then
+    skipvalidate=1
+    shift;
+  fi
   # Merge into a temp file: note the 2>&1 before the > means stderr will go into this variable
-  res=$(yq_deep_merge docker-compose.override.yml "$@" 2>&1 > new.docker-compose.override.yml)
+  res="$(yq_deep_merge docker-compose.override.yml "$@" 2>&1 > new.docker-compose.override.yml)"
   if [ "$?" -ne 0 ]; then
     echo "Failed to merge $@ with docker-compose.override.yml: resulting file would be invalid yml.  Aborting.  Failed merge is in new.docker-compose.override.yml."
     echo $res
@@ -98,7 +110,7 @@ merge_with_override() {
   fi
 
   # Ensure tmp file is valid yml
-  res=$(ensure_nonempty_yml new.docker-compose.override.yml)
+  res="$(ensure_nonempty_yml new.docker-compose.override.yml 2>&1)"
   if [ "$?" -ne 0 ]; then
     echo "Validtion of merge of $@ w/ docker-compose.override.yml failed: resulting file would be invalid yml.  Aborting.  Failed merge is in new.docker-compose.override.yml."
     echo $res
@@ -106,11 +118,14 @@ merge_with_override() {
   fi
 
   # Ensure primary docker env would still be valid:
-  res=$(validate_compose -f docker-compose.yml -f new.docker-compose.override.yml)
-  if [ "$?" -ne 0 ]; then
-    echo "Failed to merge $@ with docker-compose.override.yml: resulting overall docker setup invalid.  Aborting.  Failed merge is in new.docker-compose.override.yml."
-    echo "Manually fix and check w/ ${YELLOW}docker-compose -f docker-compose.yml -f new.docker-compose.override.yml config${NC}"
-    return 1
+  if  [ "$skipvalidate" -ne 1 ]; then
+    res="$(validate_compose -f docker-compose.yml -f new.docker-compose.override.yml 2>&1)"
+    if [ "$?" -ne 0 ]; then
+      echo "Failed to merge $@ with docker-compose.override.yml: resulting overall docker setup invalid.  Aborting.  Failed merge is in new.docker-compose.override.yml."
+      echo "Manually fix and check w/ ${YELLOW}docker-compose -f docker-compose.yml -f new.docker-compose.override.yml config${NC}"
+      echo $res
+      return 1
+    fi
   fi
 
   # Replace old override w/ new one
@@ -119,53 +134,333 @@ merge_with_override() {
 
 # Remove a service's entry from yml file
 remove_services_from_yml() {
-  local COMPOSEFILE SERVICES cmd res
+  local i COMPOSEFILE SERVICES cmd res tmpcompose
   COMPOSEFILE="$1"
   shift
-  SERVICES="$@"
+  SERVICES=( $@ )
 
   # construct command like del(.services.admin) | del(.services.yarn)
-  cmd="'"
+  cmd=""
   for ((i=0; i<${#SERVICES[@]}; i++)); do
     if [ "$i" -gt 0 ]; then
       cmd="${cmd} |"
     fi
     cmd="${cmd} del(.services.${SERVICES[$i]})"
   done
-  cmd="${cmd}'"
 
   # Send it off to yml, store in tmp file in case we fail:
-  eval "yq e ${cmd} ${COMPOSEFILE}" > new.${COMPOSEFILE}
-  res=$(ensure_nonempty_yml new.${COMPOSEFILE})
+  tmpcompose="$(dirname $COMPOSEFILE)/new.$(basename $COMPOSEFILE)"
+  yq e "${cmd}" ${COMPOSEFILE} > ${tmpcompose}
   if [ "$?" != 0 ]; then
-    echo "ERROR: failed to remove services $SERVICES from ${COMPOSEFILE}: resulting yml would be empty or invalid. Aborting"
-    echo "Failed attempt is in new.${COMPOSEFILE}"
+    echo "ERROR: Failed to execute service deletion in yq for $COMPOSEFILE."
+    echo "${YELLOW}yq e ${cmd} ${COMPOSEFILE}${NC}"
+    echo "$res"
     return 1
   fi
-  mv new.${COMPOSEFILE} ${COMPOSEFILE}
+
+  res="$(ensure_nonempty_yml ${tmpcompose})"
+  if [ "$?" != 0 ]; then
+    echo "ERROR: failed to remove services $SERVICES from ${COMPOSEFILE}: resulting yml would be empty or invalid. Aborting"
+    echo "Failed attempt is in ${tmpcompose}"
+    return 1
+  fi
+  mv "${tmpcompose}" ${COMPOSEFILE}
+}
+
+
+# Fetch releases from github
+# fetch_github oada/oada-srvc-docker latest docker-compose.yml support
+fetch_github() {
+  local CURL VER REPO RELEASE URLS
+  CURL="curl -fsSL"
+  REPO=$1
+  shift
+  VER=$1
+  shift
+
+  # Need to urlencode the version (to account for +'s)
+  # If there are no %'s already, try to urlencode so +'s and other things are prepped for URL
+  if [[ ! "$VER" =~ "%" ]]; then 
+    # Need the surrounding quotes so jq will parse
+    VER=$(echo "\"$VER\"" | jq -r '@uri')
+  fi
+
+  # Figure out URL for Github
+  echo -e "${YELLOW}Fetching version ${CYAN}${VER}${YELLOW} of docker-compose.yml from github repo ${REPO}${NC}"
+  case "$VER" in 
+    latest) INFOURL="https://api.github.com/repos/${REPO}/releases/${VER}" ;;
+    *)      INFOURL="https://api.github.com/repos/${REPO}/releases/tags/${VER}"
+  esac
+
+  # Get info for release (to find docker-compose.yml link)
+  RELEASE=$($CURL ${INFOURL})
+  if [ $? -ne 0 ]; then 
+    echo -e "Failed to retrieve version ${VER} from github for $1."
+    exit 1
+  fi
+
+  # Get the browser_download_url for each listed asset
+  URLS=( $(jq -r '.assets[] | .browser_download_url' <<< $"$RELEASE") )
+  if [ $? -ne 0 ]; then
+    echo "Failed to interpret release info response from github, response was $RELEASE"
+    exit 1
+  fi
+
+  for u in ${URLS[@]}; do 
+    echo "Retrieving github release asset ${YELLOW}$u${NC}"
+    # Pull each listed "asset" and store in current directory
+    # (the "O" adds O to the options which preserves original filename)
+    ${CURL}O $u
+    if [ $? -ne 0 ]; then
+      echo -e "Failed to retrieve asset at URL $URL"
+      exit 1
+    fi
+  done
+  
+}
+
+fetch_github_versions() {
+  local CURL RELEASES
+  CURL="curl -fsSL"
+  RELEASES=$($CURL https://api.github.com/repos/$1/releases)
+  if [ $? -ne 0 ]; then
+    echo "Failed to retrieve releases list for repo $1"
+    exit 1
+  fi
+  echo "$RELEASES" | jq -r '.[] | .tag_name'
+  if [ $? -ne 0 ]; then
+    echo "Failed to interpret github response for releases, response was $RELEASES"
+    exit 1
+  fi
 }
 
 
 
 
 
+usage_refresh() {
+  echo -e "\n\
+Refresh docker-compose.yml from oada, services, and domains.
+${GREEN}USAGE: $SCRIPTNAME refresh${NC}"
+}
 
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-# compose
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
+# List all the docker-compose files that would be included in docker-compose.yml
+services_compose_files() {
+  find ./services -name "docker-compose.oada.yml"
+}
+
+# If you set your DOMAIN env var, you can force your DOMAIN to be a particular one of your domains
+refresh_domains() {
+  local DOMAINS cmd VERSION first DOMAIN EXTRA_DOMAINS OVERRIDE res
+
+  # If we have a main docker-compose.yml, check if it is valid first.  If not, abort b/c we won't be able to validate
+  # the final compose setup
+  if [ -f docker-compose.yml ]; then
+    # If we have a main docker-compose.yml, check if new domains would be valid
+    # Do not check override b/c it could be invalid, but domains still be fine
+    validate_compose -f docker-compose.yml
+    if [ "$?" -ne 0 ]; then
+      echo "Your current docker-compose setup is invalid.  Aborting.  Fix it, validate with ${CYAN}docker-compose -f docker-compose.yml config${NC} and try again."
+      exit 1
+    fi
+  fi
+
+  echo "Refreshing ${YELLOW}domains/docker-compose.yml${NC}"
+  DOMAINS=($(cd domains && $ls | sed '/docker-compose/d'))
+  # Swag needs a single DOMAIN, and the rest go into EXTRA_DOMAINS
+  if [ "${#DOMAINS[@]}" -eq 0 ]; then
+    echo "No available domains to refresh"
+    return 1
+  fi
+
+  # If we have a domain from ENV, remove it from list of domains
+  if [ ! -z "$DOMAIN" ]; then
+    echo "Using primary domain ${YELLOW}$DOMAIN${NC} from environment"
+  # Otherwise, check if we has a saved primary domain:
+  elif [ -f ".oadadeploy/primarydomain" ]; then
+    DOMAIN="$(cat .oadadeploy/primarydomain)"
+    echo "Using primary domain ${YELLOW}${DOMAIN}${NC} from saved .oadadeploy/primarydomain"
+  else
+    echo "No saved primary domain found.  Defaulting to ${DOMAINS[0]}."
+    echo "${DOMAINS[0]}" > .oadadeploy/primarydomain
+    DOMAIN="${DOMAINS[0]}"
+  fi
+
+    
+  DOMAIN="${DOMAINS[0]}"
+  # comma-separated list of the rest of the domains, excluding primary
+  EXTRA_DOMAINS=$(join "," ${DOMAINS[@]#$DOMAIN})
+  # Write the DOMAIN env to .env to keep docker-compose happy
+  if [ ! -f ".env" ]; then
+    echo "" > .env
+  fi
+  res="$(sed "/DOMAIN=*/d" .env)"
+  echo "DOMAIN=${DOMAIN}" > .env
+  echo -n "$res" >> .env
+
+  # Get the docker-compose version from oada if we have it:
+  if [ -f oada/docker-compose.yml ]; then
+    VERSION=$(yq e '.version' oada/docker-compose.yml)
+  else
+    VERSION="3.9"
+  fi
+
+  # Construct the entire domains/docker-compose.yml from scratch
+  cmd=".version=\"${VERSION}\""
+  cmd="${cmd} | .services.proxy.environment +=  [ \"URL=${DOMAIN}\", \"EXTRA_DOMAINS=${EXTRA_DOMAINS}\" ]"
+  # If primary domain has an SSL cert in domains/<domain>/cert, mount it into proxy
+  if [ -d "domains/${DOMAIN}/cert" ]; then
+    echo "Primary domain has self-signed SSL cert at ${YELLOW}domains/${DOMAIN}/cert${NC}.  Mounting into proxy as main SSL cert."
+    cmd="${cmd} | .services.proxy.volumes += [ \"./domains/${DOMAIN}/cert:/config/keys/letsencrypt:ro\" ]"
+  fi
+  cmd="${cmd} | .services.auth.volumes += ["
+  first=1
+  for i in ${DOMAINS[@]}; do
+    if [ "$first" -ne 1 ]; then
+      cmd="${cmd},"
+    else
+      first=0
+    fi
+    cmd="${cmd} \"./domains/${i}:/oada/services/auth/domains/${i}\""
+  done
+  cmd="${cmd} ]"
+
+  # Create the file
+  yq -n e "$cmd" > domains/new.docker-compose.yml
+  if [ "$?" -ne 0 ]; then
+    echo "Failed to create domains/new.docker-compose.yml.  Aborting."
+    exit 1
+  fi
+
+  # Make sure it isn't empty
+  res=$(ensure_nonempty_yml domains/new.docker-compose.yml 2>&1)
+  if [ "$?" -ne 0 ]; then
+    echo "Domain refresh resulted in empty or invalid yml.  Failed result saved in ${YELLOW}domains/new.docker-compose.yml${NC}."
+    echo $res
+    exit 1
+  fi
+
+  # If we have a main docker-compose.yml, check if new domains would be valid
+  if [ -f docker-compose.yml ]; then
+    # If we have a main docker-compose.yml, check if new domains would be valid
+    validate_compose -f docker-compose.yml -f domains/new.docker-compose.yml
+    if [ "$?" -ne 0 ]; then
+      echo "Resulting ${YELLOW}domains/docker-compose.yml${NC} would be invalid after refresh.  Failed attempt saved in ${YELLOW}domains/new.docker-compose.yml${NC}"
+      echo "You can test with ${CYAN}docker-compose -f docker-compose.yml -f domains/new.docker-compose.yml${NC}"
+      exit 1
+    fi
+  fi
+
+  # If we get here, everything seems good so move new.docker-compose.yml to where it belongs
+  mv domains/new.docker-compose.yml domains/docker-compose.yml
+  echo "Done refreshing ${YELLOW}domains/docker-compose.yml${NC}"
+
+  refresh_compose
+}
+
+
+refresh_services() {
+
+  echo "Refreshing ${YELLOW}services/docker-compose.yml${NC} from ${YELLOW}$(services_compose_files)${NC}"
+  # Merge together services, have to use yq b/c resuling file is not a fully valid docker-compose
+  res="$(yq_deep_merge $(services_compose_files) 2>&1 > services/new.docker-compose.yml)"
+  if [ "$?" -ne 0 ]; then
+    echo "Failed merge of ${YELLOW}$(services_compose_files)${NC}."
+    echo $res
+    return 1;
+  fi
+  mv services/new.docker-compose.yml services/docker-compose.yml
+
+  refresh_compose
+}
 
 
 
+# Rebuild docker-compose.yml from all the services and oada
+# --only will NOT refresh_domains and services first
+refresh_compose() {
+  local res DOMAINS SERVICES
+
+  echo "Refreshing ${YELLOW}docker-compose.yml${NC} from ${YELLOW}oada/docker-compose.yml services/docker-compose.yml domains/docker-compose.yml${NC}"
+  if [ ! -f oada/docker-compose.yml ]; then
+    echo "You do not have oada installed in ${YELLOW}oada/docker-compose.yml${NC}. Aborting."
+    exit 1
+  fi
+
+  [ -f "domains/docker-compose.yml" ] && DOMAINS="-f domains/docker-compose.yml"
+  [ -f "services/docker-compose.yml" ] && SERVICES="-f services/docker-compose.yml"
+  # Now combine the services-only merge w/ the oada/docker-compose.yml
+  docker-compose --project-directory . -f oada/docker-compose.yml ${DOMAINS} ${SERVICES} config > new.docker-compose.yml
+  if [ "$?" -ne 0 ]; then
+    echo "Merging of files failed.  Result saved in ${YELLOW}new.docker-compose.yml${NC}."
+    echo "${YELLOW}docker-compose --project-directory . -f oada/docker-compose.yml ${DOMAINS} ${SERVICES} config > new.docker-compose.yml${NC}"
+  fi
+  # We should keep the version from oada/docker-compose.yml
+  VERSION=$(yq e '.version' oada/docker-compose.yml)
+  yq -i e ".version=\"${VERSION}\"" new.docker-compose.yml
+  if [ "$?" -ne 0 ]; then
+    echo "Unable to set version from ${YELLOW}oada/docker-compose.yml${NC}"
+    exit 1
+  fi
+
+  res="$(validate_compose -f new.docker-compose.yml)"
+  if [ "$?" -ne 0 ]; then
+    echo "Newly merged docker-compose.yml would be invalid to docker, aborting.  Failed merge is in new.docker-compose.yml"
+    echo "Manually fix and check w/ ${CYAN}docker-compose -f new.docker-compose.yml config${NC}"
+    echo "$res"
+    return 1;
+  fi
+  mv new.docker-compose.yml docker-compose.yml
+  echo "Refresh of ${YELLOW}docker-compose.yml${NC} complete."
+
+  if [ -f docker-compose.override.yml ]; then
+    res="$(validate_compose )"
+    if [ "$?" -ne 0 ]; then
+      echo "WARNING: the new ${YELLOW}docker-compose.yml${NC} is valid, but your ${YELLOW}docker-compose.overrides.yml${NC} makes it invalid."
+      echo "$res"
+      echo "Fix your overrides and check with ${CYAN}docker-compose config${NC}"
+      return 1;
+    fi
+  fi
+  
+}
+
+
+refresh() {
+  refresh_compose
+}
 
 
 
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-# admin 
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
+array_has_no_flags() {
+  for arg in $@; do
+    [[ "$arg" =~ ^- ]] && return 1; # found a flag, return false
+  done
+  return 0; # did not find it, return true (bash true is  0)
+}
+compose() {
+  local command=$1 DEFAULTFLAGS
+  shift;
+  DEFAULTFLAGS=""
+
+  # If no flags passed, lets set some defaults:
+  if array_has_no_flags $@; then
+    case $command in
+
+      # Default logs to -f --tail=200
+      logs) 
+        DEFAULTFLAGS="-f --tail=200"
+      ;;
+
+      # Add default "-d" to up
+      up)
+        DEFAULTFLAGS="-d"
+      ;;
+    esac
+  fi
+  echo -e "${YELLOW}docker-compose $command ${DEFAULTFLAGS} $@ ${NC}"
+  docker-compose $command ${DEFAULTFLAGS} $@
+}
 
 
 usage_admin() {
@@ -181,6 +476,7 @@ ${GREEN}USAGE: $SCRIPTNAME admin [devusers|extendToken|useradd|bash]
 }
 
 admin() {
+  local CMD
   CMD=$1
   shift
   case $CMD in
@@ -211,16 +507,22 @@ admin() {
       docker-compose run --rm user add $@
     ;;
 
-    # just run bash in admin container
-    bash)
-      echo "${YELLOW}docker-compose run --rm admin bash $@${NC}"
-      docker-compose run --rm admin bash
+    # run admin container, interactive
+    -it|-ti)
+      echo "${YELLOW}docker run --rm -it -v ${PWD}:/code oada/admin $@${NC}"
+      docker run --rm -it -v ${PWD}:/code oada/admin $@
     ;;
 
-    # run admin container w/ passthru commands, mapping . to /code
+    # run admin container w/ passthru commands, mapping . to /code, non-interactive
     *)
-      echo "${YELLOW}docker run --rm -v .:/code admin $@${NC}"
-      docker run --rm -v .:/code admin $@
+      # If they pass only "bash", default make it interactive
+      if [ "$#" -eq 0 ] && [ "$CMD" == "bash" ]; then
+        docker run --rm -it -v ${PWD}:/code oada/admin ${CMD} $@
+      else
+        echo "${YELLOW}docker run --rm oada/admin ${CMD} $@${NC}"
+        docker run --rm -v ${PWD}:/code oada/admin ${CMD} $@
+      fi
+
     ;;
   esac
 }
@@ -229,11 +531,140 @@ admin() {
 
 
 
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-# migrate 
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
+usage_service() {
+  echo -e "\n\
+Install new service or upgrade an existing service.
+${GREEN}USAGE: $SCRIPTNAME service [install|upgrade|refresh] [giturl|service_name]
+
+    ${CYAN}install <gitrepo> ${NC}\t\tInstall a new service, gitrepo is a string like ${YELLOW}trellisfw/trellis-monitor${NC}
+    ${CYAN}upgrade <servicename> [latest|ls|<version>]${NC}\tUpgrade <servicename>, or ls available releases.
+    ${CYAN}refresh${NC}\tRe-create services/docker-compose.yml from services/*/docker-compose.oada.yml
+
+Examples: 
+    ${YELLOW}$SCRIPTNAME service install trellisfw/trellis-monitor${NC}
+    ${YELLOW}$SCRIPTNAME service upgrade trellis-monitor${NS}
+    ${YELLOW}$SCRIPTNAME service upgrade trellis-monitor latest${NC}
+    ${YELLOW}$SCRIPTNAME service upgrade trellis-monitor ls${NC}
+    ${YELLOW}$SCRIPTNAME service upgrade trellis-monitor v1.0${NC}
+    ${YELLOW}$SCRIPTNAME service refresh${NC}"
+}
+
+# Run the domain-add within the admin container so it doesn't have to keep dropping into
+# to run jq, node, oada-certs, etc.
+service_install() {
+  local SERVICE_NAME REPO OLDPWD VERSION
+  REPO=$1
+  shift
+  
+  # get rid of the org part of the repo name (before the /), that will be the folder name
+  # Setup the service folder
+  SERVICE_NAME=${REPO#*/}
+  if [ ! -d "services/$SERVICE_NAME" ]; then
+    mkdir -p services/$SERVICE_NAME services/$SERVICE_NAME/.oadadeploy
+    echo "$REPO" > services/$SERVICE_NAME/.oadadeploy/repo
+  fi
+
+  # Now use the generic upgrade to upgrade this service
+  upgrade_core -r ${REPO} ./services/$SERVICE_NAME $@
+}
+
+# Upgrade does same thing as install, just need to swap out service name w/ repo
+service_upgrade() {
+  local REPO SERVICE_NAME
+  SERVICE_NAME=$1
+  shift
+  if [ -e "services/$SERVICE_NAME/.git" ]; then
+    echo "${YELLOW}services/$SERVICE_NAME${NC} is a git repo, to upgrade you need to git pull in that folder."
+    exit 1
+  fi
+  if [ ! -d "services/$SERVICE_NAME" ]; then
+    echo "Cannot upgrade service ${YELLOW}$SERVICE_NAME${NC} because ${YELLOW}services/$SERVICE_NAME${NC} does not exist.  Install it first."
+    exit 1
+  fi
+  if [ -f "services/$SERVICE_NAME/.oadadeploy/repo" ]; then
+    REPO="$(cat services/$SERVICE_NAME/.oadadeploy/repo)"
+  else
+    echo "Unable to determine origin repo for service $SERVICE_NAME"
+    read -p "${GREEN}What is the origin github repo (like trellisfw/trellis-monitor) for service${YELLOW} $SERVICE_NAME${GREEN}?${NC} " REPO
+  fi
+  service_install $REPO $@
+}
+
+service() {
+  local CMD
+  # Check for help
+  [[ $@ =~ -h|--help|help|\? ]] && usage service
+  CMD="$1"
+  shift
+  case "$CMD" in 
+    install) 
+      service_install $@
+    ;;
+    upgrade) 
+      service_upgrade $@
+    ;;
+    refresh)
+      refresh_services
+    ;;
+  esac
+}
+
+
+
+
+
+
+usage_domain() {
+  echo -e "\n\
+Add a new domain or refresh domains/docker-compose.yml
+${GREEN}USAGE: $SCRIPTNAME domain [add|refresh|primary] [-y] <domain>
+
+    ${CYAN}add [-y] <domain>${NC}\t\tAdd new domain, -y to accept all defaults
+    ${CYAN}refresh${NC}\tRefresh docker-compose.yml from existing domains/ directory
+    ${CYAN}primary <domain>${NC}\tSet primary domain for your deployment (in .oadadeploy/primarydomain)"
+}
+
+# Run the domain-add within the admin container so it doesn't have to keep dropping into
+# to run jq, node, oada-certs, etc.
+domain_add() {
+  local DOMAIN
+  if [ "$#" -gt 0 ]; then
+    # Domain is last command-line arg (this avoids checking for -y)
+    DOMAIN=${@: -1}
+  fi
+  admin -it /support/domains/domain-add $@
+  # Save the first domain they created as the primary domain so subsequent refreshes are consistent
+  if [ ! -f ".oadadeploy/primarydomain" ]; then
+    echo $DOMAIN > .oadadeploy/primarydomain
+  fi
+  refresh_domains
+}
+
+primary_domain() {
+  # Test if this domain exists in the domains folder
+  if [ ! -d "domains/$1" ]; then
+    echo "WARNING: requested primary domain ${YELLOW}$1${NC} does not exist in domains folder"
+  fi
+  echo "$1" > .oadadeploy/primary_domain
+}
+
+domain() {
+  # Check for help
+  [[ $@ =~ -h|--help|help|\? ]] && usage domain
+  case $1 in 
+    add) 
+      shift
+      domain_add $@
+    ;;
+    refresh) 
+      refresh_domains
+    ;;
+    primary)
+      shift
+      primary_domain $@
+    ;;
+  esac
+}
 
 
 usage_migrate() {
@@ -275,7 +706,7 @@ migrate() {
 
   # Copy any services-enabled
   if [ -d "$OLD/services-enabled" ]; then
-    read -p "Copy services-enabled? [N|y] " YN
+    read -p "${GREEN}Copy services-enabled? [N|y]${NC} " YN
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf $OLD/services-enabled/* ./services/.${NC}"
       cp -rf $OLD/services-enabled/* ./services/.
@@ -283,35 +714,50 @@ migrate() {
       # Check for z_tokens: add it to docker-compose.override.yml if it exists
       if [ -f "./services/z_tokens/docker-compose.yml" ]; then
         echo "Found ${CYAN}z_tokens${NC}, adding it explicitly to docker-compose.override.yml and removing from ./services"
-        merge_with_override services/z_tokens/docker-compose.yml \
-        && rm -rf ./services/z_tokens
+        merge_with_override --skip-validate services/z_tokens/docker-compose.yml || exit 1
+        rm -rf ./services/z_tokens
+        echo "z_tokens merged successfully"
       fi
 
-      # Every "old" service contained an entry for admin and possibly yarn containers.  Removing those entries will fix 90% of upgrade issues.
-      for i in $(cd ./services && ls); do
-        remove_services_from_yml $i/docker-compose.yml admin yarn || exit 1
+      # Now do per-service fixups
+      for i in $(cd ./services && $ls); do
+        echo "Doing initial git pull in services/$i"
+        # Do a git pull in case this service has already been updated to oada v3 model
+        (cd ./services/$i && git pull && cd ..) || (echo "Failed to git pull in service $i" && exit 1)
+
+        # If this service has a new docker-compose.oada.yml, do not auto-fix anything in it.
+        # If it does not, assume that it needs to be auto-fixed
+        if [ ! -f ./services/$i/docker-compose.oada.yml ]; then
+          # Copy the base docker-compose to oada-specific version
+          cp services/$i/docker-compose.yml services/$i/docker-compose.oada.yml
+          # Every "old" service contained an entry for admin and possibly yarn containers.  Removing those entries will fix 90% of upgrade issues.
+          echo "Cleaning any admin and yarn entries from services/$i/docker-compose.oada.yml"
+          remove_services_from_yml services/$i/docker-compose.oada.yml admin yarn || exit 1
+  
+          # All the "old" services used services-available/<name>, change to services/<name>
+          echo "Replacing services-available with services in services/$i/docker-compose.oada.yml"
+          REPLACED="$(sed 's/services-available/services/g' services/$i/docker-compose.oada.yml)"
+          echo "$REPLACED" > services/$i/docker-compose.oada.yml
+        fi
       done
 
-      # Refresh docker-compose.yml with the service's docker-compose.yml files
-      refresh_compose
+      # Refresh/create services/docker-compose.yml
+      refresh_services || exit 1
     fi
   fi
 
   # Copy any domains-enabled
   if [ -d "$OLD/domains-enabled" ]; then
-    read -p "Copy domains-enabled? [N|y] " YN
+    read -p "${GREEN}Copy domains-enabled? [N|y] ${NC}" YN
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf "$OLD/domains-enabled/*" ./domains/.${NC}"
       cp -rf $OLD/domains-enabled/* ./domains/.
-      for i in $(ls ./domains); do
-        echo "    Enabling domain ${CYAN}$i${NC}"
-        domain_enable $i
-      done
+      refresh_domains || exit 1
     fi
   fi
 
   # Copy any docker volumes w/ prior folder name as prefix into current folder name
-  read -p "Copy docker volumes?? [N|y] " YN
+  read -p "${GREEN}Copy docker volumes?? [N|y] ${NC}" YN
   if [[ "$YN" =~ y|Y|yes ]]; then
     OLDBASE=$(basename "$OLD")
     NEWBASE=$(basename "$OADA_HOME")
@@ -329,7 +775,13 @@ migrate() {
     done
   fi
 
-  # Add all service docker-composes to 
+  echo "WARNING: Adding --database.auto-upgrade=true to arangodb command in ${YELLOW}docker-compose.override.yml${NC}."
+  echo "After you successfully bring it up the first time, you should remove that."
+  yq -i e '.services.arangodb.command = [ "arangod", "--server.statistics", "true", "--database.auto-upgrade", "true" ]' docker-compose.override.yml
+
+  # Refresh docker-compose.yml with the service's docker-compose.yml files
+  refresh_compose || exit 1
+
 
   echo "Migration complete"
 }
@@ -338,18 +790,10 @@ migrate() {
 
 
 
-
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-# fetch/upgrade
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-
-
 usage_upgrade() {
   echo -e "\n\
 Upgrade existing deployment to a different oada version.
-${GREEN}USAGE: $SCRIPTNAME upgrade [ls|latest|<version>]${NC}
+${GREEN}USAGE: $SCRIPTNAME upgrade [-y] [ls|latest|<version>]${NC}
     Without parameters, it prompts for version, default latest
     ${CYAN}ls${NC}\t\tList available OADA versions in github
     ${CYAN}latest${NC}\tReplace oada/docker-compose.yml with latest github release
@@ -362,109 +806,80 @@ Examples:
     ${YELLOW}$SCRIPTNAME upgrade v3.0.0${NC}"
 }
 
-fetch_github() {
-  local CURL VER REPO RELEASE
-  CURL="curl -fsSL"
-  REPO=$1
-  VER=$2
-
-  # If there are no %'s already, try to urlencode so +'s and other things are prepped for URL
-  if [[ ! "$VER" =~ "%" ]]; then 
-    # Need the surrounding quotes so jq will parse
-    VER=$(echo "\"$VER\"" | jq -r '@uri')
-  fi
-
-  # Figure out URL for Github
-  echo -e "${YELLOW}Fetching version ${CYAN}${VER}${YELLOW} of docker-compose.yml from github repo ${REPO}${NC}"
-  case "$VER" in 
-    latest) INFOURL="https://api.github.com/repos/${REPO}/releases/${VER}" ;;
-    *)      INFOURL="https://api.github.com/repos/${REPO}/releases/tags/${VER}"
-  esac
-
-  # Get info for release (to find docker-compose.yml link)
-  RELEASE=$($CURL ${INFOURL})
-  if [ $? -ne 0 ]; then 
-    echo -e "Failed to retrieve version ${VER} from github for $1."
-    exit 1
-  fi
-  URL=$(jq -r '(.assets[] | select(.name == "docker-compose.yml") | .browser_download_url)' <<< $"$RELEASE" )
-  if [ $? -ne 0 ]; then
-    echo "Failed to interpret release info response from github, response was $RELEASE"
-    exit 1
-  fi
-
-  # Pull the docker-compose and store in oada/docker-compose.yml
-  $CURL $URL > oada/docker-compose.yml
-  if [ $? -ne 0 ]; then
-    echo -e "Failed to retrieve docker-compose at URL $URL"
-    rm oada/docker-compose.yml
-    exit 1
-  fi
-  
-}
-fetch_github_versions() {
-  local CURL RELEASES
-  CURL="curl -fsSL"
-  RELEASES=$($CURL https://api.github.com/repos/$1/releases)
-  if [ $? -ne 0 ]; then
-    echo "Failed to retrieve releases list for repo $1"
-    exit 1
-  fi
-  echo "$RELEASES" | jq -r '.[] | .tag_name'
-  if [ $? -ne 0 ]; then
-    echo "Failed to interpret github response for releases, response was $RELEASES"
-    exit 1
-  fi
-}
-fetch_oada() {
-  fetch_github oada/oada-srvc-docker $1
-}
-fetch_oada_versions() {
-  fetch_github_versions oada/oada-srvc-docker
-}
-upgrade() {
+# upgrade_core [-y] [-h|-r <repo>] <directory> [latest|ls|version]
+# upgrade_core -h
+# upgrade_core ./oada -> put oada/oada-srvc-docker assets into ./oada folder
+# upgrade_core ./oada latest -> oada/oada-srvc-docker @ latest into ./oada folder
+# upgrade_core -r trellisfw/trellis-monitor ./services/trellis-monitor ->  put repo 
+upgrade_core() {
+  local DIR VERSION REPO OLDPWD ACCEPT_DEFAULTS
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage upgrade
 
-  OADA_VERSION=$1
-  # oada upgrade ls will print the versions and exit
-  if [ "$OADA_VERSION" == "ls" ]; then
+  ACCEPT_DEFAULTS=0
+  if [ "$1" == "-y" ]; then
+    ACCEPT_DEFAULTS=1
+    shift
+  fi
+
+  # Default to oada, otherwise it is a service to upgrade
+  REPO="oada/oada-srvc-docker"
+  if [ "$1" == "-r" ]; then
+    REPO=$2
+    shift
+    shift
+  fi
+  # Get the folder name:
+  DIR="$1"
+  shift
+
+  # Figure out version to pull:
+  VERSION=""
+  if [ $# -gt 0 ]; then
+    VERSION="$1"
+  fi
+  # upgrade ls will print the versions and exit
+  if [ "$VERSION" == "ls" ]; then
     echo "${YELLOW}Available OADA release versions in github:${NC}"
-    fetch_oada_versions
+    fetch_github_versions $REPO
     exit 0
   fi
 
   # Otherwise, they passed a version or need to be asked for one:
-  while [ "x$OADA_VERSION" == "x" ]; do
-    read -p "${GREEN}What oada version would you like to use (default latest, ls to see versions)? ${NC}[latest|ls|<version>] " OADA_VERSION
-    if [ "x$OADA_VERSION" == "x" ]; then 
-      OADA_VERSION="latest"
-    elif [ "$OADA_VERSION" == "ls" ]; then
-      OADA_VERSION=""
-      echo -e "${YELLOW} Fetching list of OADA versions${NC}"
-      fetch_oada_versions
+  if [ "$ACCEPT_DEFAULTS" -eq 1 ]; then
+    VERSION="latest"
+  fi
+  while [ "x$VERSION" == "x" ]; do
+    read -p "${GREEN}What version of $REPO would you like to use (default latest, ls to see versions)? ${NC}[latest|ls|<version>] " VERSION
+    if [ "x$VERSION" == "x" ]; then 
+      VERSION="latest"
+    elif [ "$VERSION" == "ls" ]; then
+      VERSION=""
+      echo -e "${YELLOW} Fetching list of $REPO versions${NC}"
+      fetch_github_versions $REPO
     fi
   done
 
   # Get the actual docker-compose and save to oada/docker-compose.yml
-  fetch_oada ${OADA_VERSION}
+  OLDPWD="${PWD}"
+  cd "${DIR}"
+  fetch_github ${REPO} ${VERSION}
+  cd "${OLDPWD}"
 
   # Recreate primary docker-compose.yml
   refresh_compose
 }
 
+upgrade() {
+  local DEFAULTS
+  if [ "$1" == "-y" ]; then
+    DEFAULTS="-y"
+    shift
+  fi
+  upgrade_core ${DEFAULTS} ./oada $@
+}
 
 
-
-
-
-
-
-#-------------------------------------------------------------------------
-#-------------------------------------------------------------------------
-# usage
-#-------------------------------------------------------------------------
-#-------------------------------------------------------------------------
 
 
 usage() {
@@ -473,6 +888,9 @@ usage() {
     upgrade) usage_upgrade ;;
     admin) usage_admin ;;
     init) usage_init ;;
+    domain) usage_domain ;;
+    service) usage_service ;;
+    refresh) usage_refresh;;
     *)
       echo -e "\n\
 Manage local oada installation and supporting services.
@@ -482,9 +900,9 @@ OADA Commands:
    ${CYAN}init${NC}\t\tInitialize current directory w/ oada and supporting structure
    ${CYAN}upgrade${NC}\tUpgrade current oada to a different version
    ${CYAN}admin${NC}\tRun oada admin command, refer to admin help for specific commands
-   ${CYAN}domain${NC}\tSetup or modify a domains
-   ${CYAN}service${NC}\tInstall, upgrade, enable, or disable specific supporting services
-   ${CYAN}devusers${NC}\tAdd/Remove default users and tokens: for dev only, this is insecure.
+   ${CYAN}domain${NC}\tAdd a domain or refresh domains/docker-compose.yml from domains
+   ${CYAN}service${NC}\tInstall or upgrade services, or refresh docker-compose.yml from services
+   ${CYAN}refresh${NC}\tRefresh docker-compose.yml from domains/docker-compose.yml and services/docker-compose.yml
 
 docker-compose commands supported as passthru w/ bash-completion (refer to docker-compose documentation):
    ${YELLOW}build, config, create, down, events, exec, help, images, kill, logs, pause,
@@ -499,15 +917,6 @@ OADA_HOME env var sets which oada deployment used ${OADA_HOME}."
 
 
 
-
-
-
-
-#----------------------------------------------------------------------------
-#----------------------------------------------------------------------------
-# init
-#----------------------------------------------------------------------------
-#----------------------------------------------------------------------------
 
 
 usage_init() {
@@ -534,8 +943,14 @@ ensure_bash_completion_in_bashrc() {
 }
 
 init() {
-  local COMPOSE_VERSION
+  local COMPOSE_VERSION ACCEPT_DEFAULTS ARGS
   [[ $@ =~ -h|--help|help|\? ]] && usage init
+
+  ACCEPT_DEFAULTS=0
+  if [ "$1" == "-y" ]; then
+    ACCEPT_DEFAULTS=1
+  fi
+
   # Create the necessary folder structure:
   mkdir -p domains services oada .oadadeploy
 
@@ -548,17 +963,18 @@ init() {
   # symlink at /usr/local/bin to run from anywhere
   LNPATH=/usr/local/bin/oadadeploy
   # Only ask the user if this script is not already the default:
-  if [ "$(readlink $LNPATH)" != "$OADA_HOME/oadadeploy" ]; then
-    read -p "${GREEN}Make this ${NC}oadadeploy${GREEN} script default on this machine?${NC} [Y|n] " YN
+  if [ "$(readlink_crossplatform $LNPATH)" != "$OADA_HOME/oadadeploy" ]; then
+    if [ "$ACCEPT_DEFAULTS" -ne 1 ]; then 
+      read -p "${GREEN}Make this ${NC}oadadeploy${GREEN} script default on this machine?${NC} [Y|n] " YN
+    else
+      YN="y"
+    fi
     if [[ "x$YN" =~ ^(x|xy|xY)$ ]]; then
       echo -e "\tSymlinking to /usr/local/bin/oadadeploy"
       [ -h $LNPATH ] && unlink $LNPATH
       ln -s "$OADA_HOME/oadadeploy" /usr/local/bin/oadadeploy || exit 1
     fi
   fi
-
-  # If no docker-compose, pull one
-  [ -f docker-compose.yml ] || upgrade || exit 1
 
   # If no overrides, go ahead and make one
   if [ ! -f docker-compose.override.yml ]; then
@@ -567,10 +983,19 @@ init() {
     if ensure_nonempty_yml docker-compose.yml; then
       COMPOSE_VERSION=$(yq e '.version' docker-compose.yml)
     elif ensure_nonempty_yml oada/docker-compose.yml; then
-      COMPOSE_VERSION=$(yq e '.vesion' oada/docker-compose.yml)
+      COMPOSE_VERSION=$(yq e '.version' oada/docker-compose.yml)
     fi
+    echo "Initializing ${CYAN}docker-compose.override.yml${NC} with version ${COMPOSE_VERSION}"
     echo "version: \"${COMPOSE_VERSION}\"" > docker-compose.override.yml
   fi
+
+  # If no docker-compose, pull one
+  ARGS=""
+  if [ "$ACCEPT_DEFAULTS" -eq 1 ]; then 
+    ARGS="-y"
+  fi
+
+  [ -f docker-compose.yml ] || upgrade ${ARGS} || exit 1
 
   echo -e "${CYAN}Initialization complete.${NC}"
   echo -e "${YELLOW}Some things to do now:${NC}"
@@ -579,6 +1004,9 @@ init() {
   echo -e "    oadadeploy domain add <my.domain>"
   echo -e "    oadadeploy service install trellisfw/trellis-monitor"
   echo -e "    oadadeploy up"
+  echo -e "${YELLOW}IMPORTANT:${NC}"
+  echo -e "    You need add at least one domain. "
+  echo -e "    If you have none then ${CYAN}oadadeploy domain add -y localhost${NC}"
 }
 
 
@@ -603,7 +1031,7 @@ require() {
     exit
   fi
 } 
-require curl docker docker-compose
+require ls sed curl docker docker-compose
 
 # usage exits this script when done
 [ "$#" -lt 1 ] && usage
@@ -611,20 +1039,48 @@ require curl docker docker-compose
 CMD=$1
 shift
 case $CMD in 
-  compose)
-    compose $@
+  compose) 
+    compose $@ 
   ;;
+
   # Exact list of docker-compose commands to pass thru
   build|config|create|down|events|exec|images|kill|logs|pause|port|ps|pull|push|restart|rm|run|scale|start|stop|top|unpause|up) 
     compose $CMD $@
   ;;
 
-  admin) admin $@ ;;
-  init) init $@ ;;
-  upgrade) upgrade $@ ;;
-  domain) domain $@ ;;
-  service) service $@ ;;
-  migrate) migrate $@ ;;
-  help|--help|-h) usage $@ ;;
-  *) usage $@
+  admin) 
+    admin $@ 
+  ;;
+
+  init) 
+    init $@ 
+  ;;
+
+  upgrade) 
+    upgrade $@ 
+  ;;
+
+  domain) 
+    domain $@ 
+  ;;
+
+  service) 
+    service $@ 
+  ;;
+
+  migrate) 
+    migrate $@ 
+  ;;
+
+  refresh) 
+    refresh 
+  ;;
+
+  help|--help|-h) 
+    usage $@ 
+  ;;
+
+  *) 
+    usage $@
+  ;;
 esac
