@@ -307,7 +307,7 @@ refresh_domains() {
 
   # Construct the entire domains/docker-compose.yml from scratch
   cmd=".version=\"${VERSION}\""
-  cmd="${cmd} | .services.proxy.environment +=  [ \"URL=${DOMAIN}\", \"EXTRA_DOMAINS=${EXTRA_DOMAINS}\" ]"
+  cmd="${cmd} | .services.proxy.environment +=  [ \"URL=${DOMAIN}\", \"EXTRA_DOMAINS=${EXTRA_DOMAINS}\", \"SUBDOMAINS=\" ]"
   # If primary domain has an SSL cert in domains/<domain>/cert, mount it into proxy
   if [ -d "domains/${DOMAIN}/cert" ]; then
     echo "Primary domain has self-signed SSL cert at ${YELLOW}domains/${DOMAIN}/cert${NC}.  Mounting into proxy as main SSL cert."
