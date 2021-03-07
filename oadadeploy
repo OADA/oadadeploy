@@ -475,6 +475,38 @@ ${GREEN}USAGE: $SCRIPTNAME admin [devusers|extendToken|useradd|bash]
     *\t\t\tRuns arbitrary command in admin container"
 }
 
+add_devusers() {
+  local res cmd
+  echo "INSECURE: adding default users/tokens to your docker-compose.overrides.yml (in startup)"
+  cmd="del(.services.startup.environment.[] | select(. == \"arangodb__ensureDefaults*\"))"
+  cmd="${cmd} | .services.startup.environment += [ \"arangodb__ensureDefaults=true\" ]"
+  res=$(yq e "${cmd}" docker-compose.override.yml 2>&1 > new.docker-compose.override.yml)
+  if [ "$?" -ne 0 ]; then
+    echo "Failed to add devusers environment variable to startup in override.  Failed attempt is in new.docker-compose.override.yml"
+    echo "$res"
+    exit 1
+  fi
+  mv new.docker-compose.override.yml docker-compose.override.yml
+  echo "${YELLOW}docker-compose up -d startup${NC}"
+  docker-compose up -d startup
+}
+
+rm_devusers() {
+  local res
+  echo "Removing: default users/tokens"
+  cmd="del(.services.startup.environment.[] | select(. == \"arangodb__ensureDefaults*\"))"
+  cmd="${cmd} | .services.startup.environment += [ \"arangodb__ensureDefaults=false\" ]"
+  res=$(yq e "${cmd}" docker-compose.override.yml 2>&1 > new.docker-compose.override.yml)
+  if [ "$?" -ne 0 ]; then
+    echo "Failed to set devusers environment variable to false for startup in override.  Failed attempt is in new.docker-compose.override.yml"
+    echo "$res"
+    exit 1
+  fi
+  mv new.docker-compose.override.yml docker-compose.override.yml
+  echo "${YELLOW}docker-compose up -d startup${NC}"
+  docker-compose up -d startup
+}
+
 admin() {
   local CMD
   CMD=$1
@@ -482,14 +514,12 @@ admin() {
   case $CMD in
     # add|rm the dummy tokens/users from db
     devusers)
-      case $2 in 
+      case $1 in 
         add)
-          echo -e "${YELLOW}arangodb__ensureDefaults=true docker-compose up -d startup${NC}"
-          arangodb__ensureDefaults=true docker-compose up -d startup
+          add_devusers
         ;;
         rm)
-          echo -e "${YELLOW}arangodb__ensureDefaults=false docker-compose up -d startup${NC}"
-          arangodb__ensureDefaults=false docker-compose up -d startup
+          rm_devusers
         ;;
         *) echo -e "USAGE: $SCRIPTNAME admin devusers [add|rm]" ;;
       esac
