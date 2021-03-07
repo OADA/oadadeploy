@@ -70,4 +70,10 @@ oadadeploy domain add my.domain
 oadadeploy domain refresh
 ```
 
+## Create oadadeploy installable service
+---------------------------------------
+
+`oadadeploy` looks for `docker-compose.oada.yml` inside the `services/<name>` directory.  Simply create a service
+with that file (which assumes the context is the root of an oadadeployment), and you're good.  If you want to
+make your service installable and upgradeable, make the docker-compose.oada.yml file accessible in a github release.
 
