@@ -12,7 +12,7 @@ Refreshes docker-compose.yml and docker-compose.override.yml"
 }
 
 migrate() {
-  local OLD OLDBASE NEWBASE NEWNAME VOLS
+  local OLD OLDBASE NEWBASE NEWNAME VOLS svc
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage migrate
   OLD=$1
@@ -103,6 +103,22 @@ migrate() {
            -v $v:/old \
            -v $NEWNAME:/new \
            alpine ash -c "cd /old; cp -av . /new" &> /dev/null
+    done
+  fi
+  read -p "${GREEN}Kafka and zookeoper volumes have to be deleted in order for new kafka to work.  Docker requires the container to be removed in order to remove the container.  Delete kafka and zookeeper containers and volumes? [N|y] ${NC}" YN
+  if [[ "$YN" =~ y|Y|yes ]]; then
+    NEWBASE=$(basename "$OADA_HOME")
+    for svc in kafka zookeeper; do
+      # Check for oada_kafka_1 container
+      if [ "$(docker ps -a | grep ${NEWBASE}_${svc}_1 | wc -l)" -eq 1 ]; then
+        echo "Removing ${YELLOW}${NEWBASE}_${svc}_1 container"
+        docker rm ${NEWBASE}_kafka_1
+      fi
+      echo "Removing volume ${NEWBASE}_$svc_data"
+      docker volume rm ${NEWBASE}_${svc}_data
+      if [ "$?" -ne 0 ]; then
+        echo "ERROR: Failed to rm ${NEWBASE}_${svc}_data. Continuing."
+      fi
     done
   fi
 
