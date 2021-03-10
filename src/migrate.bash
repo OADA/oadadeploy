@@ -50,6 +50,8 @@ migrate() {
       if [ -f "./services/z_tokens/docker-compose.yml" ]; then
         echo "Found ${CYAN}z_tokens${NC}, adding it explicitly to docker-compose.override.yml and removing from ./services"
         merge_with_override --skip-validate services/z_tokens/docker-compose.yml || exit 1
+        echo "Removing any admin service references from docker-compose.override.yml"
+        yq -i e 'del(.services.admin)' docker-compose.override.yml
         rm -rf ./services/z_tokens
         echo "z_tokens merged successfully"
       fi
@@ -58,7 +60,7 @@ migrate() {
       for i in $(cd ./services && $ls); do
         echo "Doing initial git pull in services/$i"
         # Do a git pull in case this service has already been updated to oada v3 model
-        (cd ./services/$i && git pull && cd ..) || (echo "Failed to git pull in service $i" && exit 1)
+        (cd ./services/$i && git pull && cd ..) || echo "WARNING: Failed to git pull in service $i"
 
         # If this service has a new docker-compose.oada.yml, do not auto-fix anything in it.
         # If it does not, assume that it needs to be auto-fixed
@@ -126,9 +128,15 @@ migrate() {
     done
   fi
 
-  echo "WARNING: Adding --database.auto-upgrade=true to arangodb command in ${YELLOW}docker-compose.override.yml${NC}."
-  echo "After you successfully bring it up the first time, you should remove that."
-  yq -i e '.services.arangodb.command = [ "arangod", "--server.statistics", "true", "--database.auto-upgrade", "true" ]' docker-compose.override.yml
+  read -p "${GREEN}WARNING: arangodb needs to upgrade its database.  Make a backup.  Should I upgrade database now? [N|y]" YN
+  if [[ "$YN" =~ y|Y|yes ]]; then
+    echo "Adding auto-upgrade to arangodb override"
+    yq -i e '.services.arangodb.command = [ "arangod", "--server.statistics", "true", "--database.auto-upgrade", "true" ]' docker-compose.override.yml || exit 1
+    echo "Bringing up arangodb once to force upgrade"
+    docker-compose run --rm arangodb || exit 1
+    echo "Removing auto-upgrade from arangodb override"
+    yq -i e 'del(.services.arangodb.command)' docker-compose.override.yml || exit 1
+  fi
 
   # Refresh docker-compose.yml with the service's docker-compose.yml files
   refresh_compose || exit 1
