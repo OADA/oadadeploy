@@ -29,7 +29,7 @@ primary_domain() {
   if [ ! -d "domains/$1" ]; then
     echo "WARNING: requested primary domain ${YELLOW}$1${NC} does not exist in domains folder"
   fi
-  echo "$1" > .oadadeploy/primary_domain
+  echo "$1" > .oadadeploy/primarydomain
 }
 
 domain() {

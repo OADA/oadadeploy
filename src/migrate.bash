@@ -12,7 +12,7 @@ Refreshes docker-compose.yml and docker-compose.override.yml"
 }
 
 migrate() {
-  local OLD OLDBASE NEWBASE NEWNAME VOLS svc
+  local OLD OLDBASE NEWBASE NEWNAME VOLS svc REALDEST
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage migrate
   OLD=$1
@@ -40,7 +40,11 @@ migrate() {
     read -p "${GREEN}Copy services-enabled? [N|y]${NC} " YN
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf $OLD/services-enabled/* ./services/.${NC}"
-      cp -rf $OLD/services-enabled/* ./services/.
+      for i in $(cd "$OLD/services-enabled" && $ls); do
+        echo "Copying service ${YELLOW}${i}"
+        REALDEST=$(readlink_crossplatform "$OLD/services-enabled/$i")
+        cp -rf "${REALDEST}" ./services/.
+      done
 
       # Check for z_tokens: add it to docker-compose.override.yml if it exists
       if [ -f "./services/z_tokens/docker-compose.yml" ]; then

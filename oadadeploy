@@ -675,7 +675,7 @@ primary_domain() {
   if [ ! -d "domains/$1" ]; then
     echo "WARNING: requested primary domain ${YELLOW}$1${NC} does not exist in domains folder"
   fi
-  echo "$1" > .oadadeploy/primary_domain
+  echo "$1" > .oadadeploy/primarydomain
 }
 
 domain() {
@@ -711,7 +711,7 @@ Refreshes docker-compose.yml and docker-compose.override.yml"
 }
 
 migrate() {
-  local OLD OLDBASE NEWBASE NEWNAME VOLS svc
+  local OLD OLDBASE NEWBASE NEWNAME VOLS svc REALDEST
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage migrate
   OLD=$1
@@ -739,7 +739,11 @@ migrate() {
     read -p "${GREEN}Copy services-enabled? [N|y]${NC} " YN
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf $OLD/services-enabled/* ./services/.${NC}"
-      cp -rf $OLD/services-enabled/* ./services/.
+      for i in $(cd "$OLD/services-enabled" && $ls); do
+        echo "Copying service ${YELLOW}${i}"
+        REALDEST=$(readlink_crossplatform "$OLD/services-enabled/$i")
+        cp -rf "${REALDEST}" ./services/.
+      done
 
       # Check for z_tokens: add it to docker-compose.override.yml if it exists
       if [ -f "./services/z_tokens/docker-compose.yml" ]; then
@@ -989,7 +993,7 @@ ensure_bash_completion_in_bashrc() {
 }
 
 init() {
-  local COMPOSE_VERSION ACCEPT_DEFAULTS ARGS
+  local COMPOSE_VERSION ACCEPT_DEFAULTS ARGS ME
   [[ $@ =~ -h|--help|help|\? ]] && usage init
 
   ACCEPT_DEFAULTS=0
@@ -1016,9 +1020,11 @@ init() {
       YN="y"
     fi
     if [[ "x$YN" =~ ^(x|xy|xY)$ ]]; then
-      echo -e "\tSymlinking to /usr/local/bin/oadadeploy"
+      echo -e "\tSymlinking to /usr/local/bin/oadadeploy, THIS RUNS AS SUDO"
       [ -h $LNPATH ] && unlink $LNPATH
-      ln -s "$OADA_HOME/oadadeploy" /usr/local/bin/oadadeploy || exit 1
+      sudo ln -s "$OADA_HOME/oadadeploy" /usr/local/bin/oadadeploy || exit 1
+      ME=$(whoami)
+      sudo chown "$ME" /usr/local/bin/oadadeploy
     fi
   fi
 

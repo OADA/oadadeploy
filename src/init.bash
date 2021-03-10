@@ -22,7 +22,7 @@ ensure_bash_completion_in_bashrc() {
 }
 
 init() {
-  local COMPOSE_VERSION ACCEPT_DEFAULTS ARGS
+  local COMPOSE_VERSION ACCEPT_DEFAULTS ARGS ME
   [[ $@ =~ -h|--help|help|\? ]] && usage init
 
   ACCEPT_DEFAULTS=0
@@ -49,9 +49,11 @@ init() {
       YN="y"
     fi
     if [[ "x$YN" =~ ^(x|xy|xY)$ ]]; then
-      echo -e "\tSymlinking to /usr/local/bin/oadadeploy"
+      echo -e "\tSymlinking to /usr/local/bin/oadadeploy, THIS RUNS AS SUDO"
       [ -h $LNPATH ] && unlink $LNPATH
-      ln -s "$OADA_HOME/oadadeploy" /usr/local/bin/oadadeploy || exit 1
+      sudo ln -s "$OADA_HOME/oadadeploy" /usr/local/bin/oadadeploy || exit 1
+      ME=$(whoami)
+      sudo chown "$ME" /usr/local/bin/oadadeploy
     fi
   fi
 
