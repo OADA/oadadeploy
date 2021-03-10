@@ -75,6 +75,12 @@ migrate() {
           echo "Replacing services-available with services in services/$i/docker-compose.oada.yml"
           REPLACED="$(sed 's/services-available/services/g' services/$i/docker-compose.oada.yml)"
           echo "$REPLACED" > services/$i/docker-compose.oada.yml
+
+          # All the "old" services used container_name, remove that line from their yml:
+          echo "Removing container_name so it doesn't conflict w/ old OADA installation"
+          REPLACED="$(sed '/container_name/d' services/$i/docker-compose.oada.yml)"
+          echo "$REPLACED" > services/$i/docker-compose.oada.yml
+
         fi
       done
 
