@@ -41,7 +41,7 @@ migrate() {
     if [[ "$YN" =~ y|Y|yes ]]; then
       echo "${YELLOW}cp -rf $OLD/services-enabled/* ./services/.${NC}"
       for i in $(cd "$OLD/services-enabled" && $ls); do
-        echo "Copying service ${YELLOW}${i}"
+        echo "Copying service ${YELLOW}${i}${NC}"
         REALDEST=$(readlink_crossplatform "$OLD/services-enabled/$i")
         cp -rf "${REALDEST}" ./services/.
       done
