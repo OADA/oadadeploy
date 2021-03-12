@@ -31,7 +31,7 @@ init() {
   fi
 
   # Create the necessary folder structure:
-  mkdir -p domains services oada .oadadeploy
+  mkdir -p domains services oada .oadadeploy support
 
   # Setup and maintain a ./.oadadeploy/ folder to drive bash_completion and store other info
   # store OADA_HOME in bash-completion, default to current env

@@ -12,7 +12,7 @@ Refreshes docker-compose.yml and docker-compose.override.yml"
 }
 
 migrate() {
-  local OLD OLDBASE NEWBASE NEWNAME VOLS svc REALDEST
+  local OLD OLDBASE NEWBASE NEWNAME VOLS svc REALDEST OLDBINARYPATH
   # Check for help
   [[ $@ =~ -h|--help|help|\? ]] && usage migrate
   OLD=$1
@@ -49,10 +49,19 @@ migrate() {
       # Check for z_tokens: add it to docker-compose.override.yml if it exists
       if [ -f "./services/z_tokens/docker-compose.yml" ]; then
         echo "Found ${CYAN}z_tokens${NC}, adding it explicitly to docker-compose.override.yml and removing from ./services"
+        [ ! -d "./support" ] && mkdir ./support
+        # fix paths in z_tokens' docker-compose.yml file
+        echo "Replacing any ./services-available/z_tokens paths with ./support/ in z_tokens' docker-compose.yml"
+        REPLACED="$(sed 's/services-available\/z_tokens/support/g' services/z_tokens/docker-compose.yml)"
+        echo "$REPLACED" > services/z_tokens/docker-compose.yml
         merge_with_override --skip-validate services/z_tokens/docker-compose.yml || exit 1
         echo "Removing any admin service references from docker-compose.override.yml"
-        yq -i e 'del(.services.admin)' docker-compose.override.yml
-        rm -rf ./services/z_tokens
+        yq -i e 'del(.services.admin)' docker-compose.override.yml || exit 1
+        # Move everything (i.e. private keys, etc.) from z_tokens to now be under ./support, and fix the z_tokens paths
+        echo "Removing old z_tokens docker-compose.yml now that it is in overrides, and moving any other z_tokens supporting files to ./support"
+        rm services/z_tokens/docker-compose.yml && \
+        mv -f services/z_tokens/* ./support/. && \
+        rm -rf services/z_tokens
         echo "z_tokens merged successfully"
       fi
 
@@ -100,12 +109,12 @@ migrate() {
   fi
 
   # Copy any docker volumes w/ prior folder name as prefix into current folder name
+  OLDBASE=$(basename "$OLD")
+  NEWBASE=$(basename "$OADA_HOME")
+  VOLS=$(docker volume ls -qf name="${OLDBASE}")
+
   read -p "${GREEN}Copy docker volumes?? [N|y] ${NC}" YN
   if [[ "$YN" =~ y|Y|yes ]]; then
-    OLDBASE=$(basename "$OLD")
-    NEWBASE=$(basename "$OADA_HOME")
-    VOLS=$(docker volume ls -qf name="${OLDBASE}")
-
     for v in $VOLS; do
       NEWNAME="${NEWBASE}${v#$OLDBASE}"
       echo "    Copying volume ${CYAN}$v${NC} to ${CYAN}$NEWNAME${NC}"
@@ -117,9 +126,23 @@ migrate() {
            alpine ash -c "cd /old; cp -av . /new" &> /dev/null
     done
   fi
+
+  read -p "${GREEN}New OADA puts binary files in binary_data docker volume.  Create this volume and copy in existing http-handler binary data?${NC} [N|y]" YN
+  if [[ "$YN" =~ y|Y|yes ]]; then
+    NEWNAME="${NEWBASE}_binary_data"
+    OLDBINARYPATH="${OLD}/oada-core/http-handler/oada-srvc-http-handler/tmp/oada-cache"
+    echo "    Creating volume ${YELLOW}${NEWNAME}${NC} and copying from ${YELLOW}$OLDBINARYPATH${NC}"
+    docker volume create "${NEWNAME}" &> /dev/null || echo "ERROR: FAILED TO CREATE VOLUME ${NEWNAME}"
+    docker run --rm \
+         -v ${OLDBINARYPATH}:/old \
+         -v ${NEWNAME}:/new \
+         alpine ash -c "cd /old; cp -av . /new" &> /dev/null
+    echo "Done copying previous binary data to ${NEWNAME}"
+  fi
+
+
   read -p "${GREEN}Kafka and zookeoper volumes have to be deleted in order for new kafka to work.  Docker requires the container to be removed in order to remove the container.  Delete kafka and zookeeper containers and volumes? [N|y] ${NC}" YN
   if [[ "$YN" =~ y|Y|yes ]]; then
-    NEWBASE=$(basename "$OADA_HOME")
     for svc in kafka zookeeper; do
       # Check for oada_kafka_1 container
       if [ "$(docker ps -a | grep ${NEWBASE}_${svc}_1 | wc -l)" -eq 1 ]; then
