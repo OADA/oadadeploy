@@ -42,7 +42,7 @@ _oada_completions() {
 
       admin)
         if [ $COMP_CWORD -eq 2 ]; then
-          COMPREPLY=($(compgen -W "useradd extendToken devusers bash help" "$cur"))
+          COMPREPLY=($(compgen -W "useradd token devusers bash help" "$cur"))
         elif [ $COMP_CWORD -eq 3 ]; then
           secondcmd="${COMP_WORDS[2]}"
           case $secondcmd in

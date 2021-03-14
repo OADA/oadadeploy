@@ -4,7 +4,7 @@ Execute administrative command
 
 ${GREEN}USAGE: $SCRIPTNAME admin [devusers|extendToken|useradd|bash]
     devusers\t[add|rm] dummy users/tokens for development (insecure)
-    extendToken\tRuns the extendToken script in auth
+    token\tRuns the token.js script in auth (create, extend, revoke)
     useradd\tRuns the add script in users
     bash\t\tGives you a bash shell in admin container
     *\t\t\tRuns arbitrary command in admin container"
@@ -60,16 +60,16 @@ admin() {
       esac
     ;;
 
-    # extend token expiration
-    extendToken)
-      echo "${YELLOW}docker-compose run --rm auth extendToken $@${NC}"
-      docker-compose run --rm auth extendToken $@
+    # create, extend, and revoke tokens for users
+    token)
+      echo "${YELLOW}docker-compose exec auth yarn run token $@${NC}"
+      docker-compose exec auth yarn run token $@
     ;;
 
     # add users
     useradd) 
-      echo "${YELLOW}docker-compose run --rm user add $@${NC}"
-      docker-compose run --rm user add $@
+      echo "${YELLOW}docker-compose exec users yarn run add $@${NC}"
+      docker-compose exec users yarn run add $@
     ;;
 
     # run admin container, interactive
