@@ -47,7 +47,6 @@ refresh_domains() {
   fi
 
     
-  DOMAIN="${DOMAINS[0]}"
   # comma-separated list of the rest of the domains, excluding primary
   EXTRA_DOMAINS=$(join "," ${DOMAINS[@]#$DOMAIN})
   # Write the DOMAIN env to .env to keep docker-compose happy
