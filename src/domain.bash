@@ -25,11 +25,16 @@ domain_add() {
 }
 
 primary_domain() {
+  local ENV
   # Test if this domain exists in the domains folder
   if [ ! -d "domains/$1" ]; then
     echo "WARNING: requested primary domain ${YELLOW}$1${NC} does not exist in domains folder"
   fi
   echo "$1" > .oadadeploy/primarydomain
+  # Reset the primary DOMAIN entry in .env
+  ENV=$(sed '/DOMAIN=/d' .env)
+  echo "$ENV" > .env
+  echo "DOMAIN=$1" >> .env
 }
 
 domain() {
