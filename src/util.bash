@@ -123,7 +123,7 @@ remove_services_from_yml() {
 
 
 # Fetch releases from github
-# fetch_github oada/oada-srvc-docker latest docker-compose.yml support
+# fetch_github oada/server latest docker-compose.yml support
 fetch_github() {
   local CURL VER REPO RELEASE URLS
   CURL="curl -fsSL"

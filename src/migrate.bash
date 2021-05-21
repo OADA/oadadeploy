@@ -1,7 +1,7 @@
 usage_migrate() {
   echo -e "\n\
 Migrate from an older Git-based installation to v3+ image-based installation
-${GREEN}USAGE: $SCRIPTNAME migrate [path/to/old/oada-srvc-docker]
+${GREEN}USAGE: $SCRIPTNAME migrate [path/to/old/server]
 
 STOPS docker from old installation
 Copies services-enabled

@@ -16,8 +16,8 @@ Examples:
 
 # upgrade_core [-y] [-h|-r <repo>] <directory> [latest|ls|version]
 # upgrade_core -h
-# upgrade_core ./oada -> put oada/oada-srvc-docker assets into ./oada folder
-# upgrade_core ./oada latest -> oada/oada-srvc-docker @ latest into ./oada folder
+# upgrade_core ./oada -> put oada/server assets into ./oada folder
+# upgrade_core ./oada latest -> oada/server @ latest into ./oada folder
 # upgrade_core -r trellisfw/trellis-monitor ./services/trellis-monitor ->  put repo 
 upgrade_core() {
   local DIR VERSION REPO OLDPWD ACCEPT_DEFAULTS
@@ -31,7 +31,7 @@ upgrade_core() {
   fi
 
   # Default to oada, otherwise it is a service to upgrade
-  REPO="oada/oada-srvc-docker"
+  REPO="oada/server"
   if [ "$1" == "-r" ]; then
     REPO=$2
     shift

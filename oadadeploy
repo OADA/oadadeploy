@@ -169,7 +169,7 @@ remove_services_from_yml() {
 
 
 # Fetch releases from github
-# fetch_github oada/oada-srvc-docker latest docker-compose.yml support
+# fetch_github oada/server latest docker-compose.yml support
 fetch_github() {
   local CURL VER REPO RELEASE URLS
   CURL="curl -fsSL"
@@ -704,7 +704,7 @@ domain() {
 usage_migrate() {
   echo -e "\n\
 Migrate from an older Git-based installation to v3+ image-based installation
-${GREEN}USAGE: $SCRIPTNAME migrate [path/to/old/oada-srvc-docker]
+${GREEN}USAGE: $SCRIPTNAME migrate [path/to/old/server]
 
 STOPS docker from old installation
 Copies services-enabled
@@ -899,8 +899,8 @@ Examples:
 
 # upgrade_core [-y] [-h|-r <repo>] <directory> [latest|ls|version]
 # upgrade_core -h
-# upgrade_core ./oada -> put oada/oada-srvc-docker assets into ./oada folder
-# upgrade_core ./oada latest -> oada/oada-srvc-docker @ latest into ./oada folder
+# upgrade_core ./oada -> put oada/server assets into ./oada folder
+# upgrade_core ./oada latest -> oada/server @ latest into ./oada folder
 # upgrade_core -r trellisfw/trellis-monitor ./services/trellis-monitor ->  put repo 
 upgrade_core() {
   local DIR VERSION REPO OLDPWD ACCEPT_DEFAULTS
@@ -914,7 +914,7 @@ upgrade_core() {
   fi
 
   # Default to oada, otherwise it is a service to upgrade
-  REPO="oada/oada-srvc-docker"
+  REPO="oada/server"
   if [ "$1" == "-r" ]; then
     REPO=$2
     shift
