@@ -1,0 +1,137 @@
+#! /bin/bash
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'
+NC=$'\033[0m' # No Color
+SCRIPTNAME=$0
+
+create_selfsigned_ssl_cert() {
+  mkdir cert
+  cd cert
+  openssl req -x509 -sha256 -newkey rsa:2048 -keyout privkey.pem -out fullchain.pem -days 1024 -nodes -subj "/CN=$1"
+  cd ..
+}
+
+create_unsigned_software_statement() {
+  local cmd res
+  cmd="\
+    const fs = require('fs');
+    const a = require('/support/domains/unsigned_software_statement'); 
+    const extras = '${EXTRA_REDIRECTS}'.replace(/ /g,'').split(',');
+    a.redirect_uris = [ '${DOMAIN}/oadaauth/id-redirect' ];
+    if (extras && extras.length > 0) {
+      a.redirect_uris = [ ...a.redirect_uris, ...extras ];
+    }
+    a.client_name = '${NAME}';
+    a.contacts = [ '${CONTACTS}' ];
+    a.jwks = {
+      keys: [
+        // cannot easily require(public_key.jwk) because of the jwk extension
+        JSON.parse(fs.readFileSync('./public_key.jwk').toString())
+      ]
+    };
+    console.log(JSON.stringify(a, false, '  '));";
+  res=$(echo "$cmd" | node)
+  echo "module.exports = ${res}"
+}
+
+# Note: you have to create the keys and run 
+# create_unsigned_software_statement BEFORE running create_config
+create_config() {
+  local cmd res
+  cp /support/domains/config.js .
+  cmd="\
+    const a = require('./config'); 
+    a.domain = '${DOMAIN}',
+    a.baseuri = 'https://${DOMAIN}',
+    a.logo = '${LOGO}'
+    a.name = '${NAME}'
+    console.log(JSON.stringify(a, false, '  '));"
+  res=$(echo "$cmd" | node)
+  echo "module.exports = ${res}"
+}
+
+# -y means "accept all the defaults"
+USEDEFAULTS="n"
+if [ "$1" == "-y" ]; then
+  USEDEFAULTS="y"
+  shift
+fi
+
+# Get a domain, use $DOMAIN from env if available and nothing passed on command line
+if [ "$#" -eq 1 ]; then
+  DOMAIN="$1"
+fi
+if [ "x$DOMAIN" == "x" ]; then
+  read -p "${GREEN}What domain would you like to add? ${NC}" DOMAIN
+fi
+if [ "x$DOMAIN" == "x" ]; then
+  echo "You must give a domain to add."
+  exit 1
+fi
+
+if [ -e "domains/$DOMAIN" ]; then
+  echo "Domain domains/$DOMAIN already exists, move that one if you want to re-initialize it."
+  exit 1
+fi
+
+# strip any leading https://
+DOMAIN=$(echo "$DOMAIN" | sed 's/https:\/\///')
+echo "Creating ${YELLOW}domains/${DOMAIN}${NC}"
+mkdir -p "domains/$DOMAIN"
+
+SELFDEFAULT="[N|y]"
+if [ "$DOMAIN" == "localhost" ]; then
+  SELFDEFAULT=" (localhost: [Y|n])"
+fi
+if [ "x$USEDEFAULTS" != "xy" ]; then
+  # Get a "name" to show people
+  read -p "${GREEN}Create a self-signed SSL cert?${NC} $SELFDEFAULT " WANTSELFSIGNEDCERT
+  read -p "${GREEN}What name should be on the login page?${NC} [Open Ag Data Alliance]" NAME
+  read -p "${GREEN}Path to a logo for login page? ${NC} [none] " LOGOPATH
+  read -p "${GREEN}Comma-separated list of additional redirect_uris for client certificate? ${NC} [none] " EXTRA_REDIRECTS
+  read -p "${GREEN}Valid email for client certificate contact? ${NC} [none] " CONTACTS
+fi
+
+# Tricky handling of defaults for whether to create a self-signed cert:
+MAKESELFSIGNEDCERT=0
+if [ "$DOMAIN" == "localhost" ]; then
+  if [ "x$WANTSELFSIGNEDCERT" != "xn" ]; then
+    MAKESELFSIGNEDCERT=1
+  fi 
+else
+  if [ "x$WANTSELFSIGNEDCERT" == "xy" ]; then
+    MAKESELFSIGNEDCERT=1
+  fi 
+fi
+
+if [ "x$NAME" == "x" ]; then 
+  NAME="Open Ag Data Alliance"
+fi
+if [ "x$LOGOPATH" == "x" ]; then
+  # Use default logo
+  LOGO="logo.png" 
+else
+  # Use the logo they passed, copy it into domains folder below
+  LOGO=$(basename "$LOGO")
+  echo "Copying ${YELLOW}${LOGOPATH}${NC} to ${YELLOW}domains/$DOMAIN/$LOGO${NC}"
+  cp "$LOGOPATH" "domains/$DOMAIN/$LOGO"
+fi
+ 
+# Create the signing keys and sign the unsigned_software_statement.js
+OLDPWD="${PWD}"
+cd "domains/$DOMAIN"
+oada-certs --create-keys > /dev/null
+create_unsigned_software_statement > unsigned_software_statement.js
+oada-certs > /dev/null
+create_config > config.js
+# If they want self-signed certificate to mount into proxy, create it:
+if [ "$MAKESELFSIGNEDCERT" -eq 1 ]; then
+  echo "Creating self-signed SSL cert in domains/$DOMAIN/cert"
+  echo "If you try to connect w/ Chrome or Brave, you'll need to enable self-signed localhost."
+  echo "Paste this into your browser: ${CYAN}chrome://flags/#allow-insecure-localhost${NC}"
+  create_selfsigned_ssl_cert $DOMAIN
+fi
+cd ${OLDPWD}
+
+echo "Done setting up ${YELLOW}domains/$DOMAIN${NC}"

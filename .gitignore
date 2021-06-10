@@ -1,5 +1,8 @@
 domains
+!admin/support/domains
 .oadadeploy
 docker-compose.yml
+!admin/support/docker-compose.yml
 docker-compose.override.yml
 common.yml
+!./admin/support/**/*

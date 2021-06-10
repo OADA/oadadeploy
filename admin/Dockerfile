@@ -1,9 +1,12 @@
-FROM node:14-buster-slim
+FROM node:16-alpine
 
 WORKDIR /code
 
-RUN apt-get -y update
-RUN apt-get -y --no-install-recommends install jq curl ca-certificates openssl
+# If switching back to debian:
+#RUN apt-get -y update
+#RUN apt-get -y --no-install-recommends install jq curl ca-certificates openssl
+
+RUN apk add bash jq curl ca-certificates openssl
 
 RUN yarn global add @oada/oada-certs
 
