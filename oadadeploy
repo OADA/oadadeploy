@@ -1126,8 +1126,13 @@ require() {
 } 
 require ls sed curl docker docker-compose
 
+# Verify docker is actually running, otherwise nothing is going to work
+docker version > /dev/null 2>&1
+[ "$?" -ne 0 ] && echo -e "ERROR: docker does not appear to be running, please start it first" && exit 1
+
 # usage exits this script when done
 [ "$#" -lt 1 ] && usage
+
 
 CMD=$1
 shift
